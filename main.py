@@ -192,24 +192,26 @@ import os
 import threading
 from flask import Flask
 
-# Add mini web server for Render Free Tier
+# 1. Create mini web app for Render port check
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "Taxi Bot is running!"
+    return "Bot is active!"
 
 def run_web():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.getenv("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # Start web server in background
-    threading.Thread(target=run_web, daemon=True).start()
+    # 2. Start web server thread FIRST
+    t = threading.Thread(target=run_web)
+    t.daemon = True
+    t.start()
 
-    # Start Telegram Bot
+    # 3. Start Telegram Bot polling
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start), CommandHandler("book", start)],
         states={
