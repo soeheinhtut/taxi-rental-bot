@@ -472,3 +472,10 @@ async def webhook_endpoint(request: Request):
 @app_fastapi.get("/")
 def home():
     return {"status": "Bot is active!"}
+
+# ... (all your other bot handlers, conversations, and webhook endpoints go above) ...
+
+# --- HOME ROUTE FOR HEALTH PINGS / UPTIMEROBOT ---
+@app.get("/")
+def home():
+    return {"status": "Bot is active!"}
