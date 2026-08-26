@@ -187,3 +187,41 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(accept_booking, pattern="^accept_"))
     
     app.run_polling()
+
+import os
+import threading
+from flask import Flask
+
+# Add mini web server for Render Free Tier
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def home():
+    return "Taxi Bot is running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    # Start web server in background
+    threading.Thread(target=run_web, daemon=True).start()
+
+    # Start Telegram Bot
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start), CommandHandler("book", start)],
+        states={
+            CAR_TYPE: [CallbackQueryHandler(car_selected)],
+            PACKAGE: [CallbackQueryHandler(package_selected)],
+            LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, location_received)],
+            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, phone_received)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+
+    app.add_handler(conv_handler)
+    app.add_handler(CallbackQueryHandler(accept_booking, pattern="^accept_"))
+    
+    app.run_polling()
