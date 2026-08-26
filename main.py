@@ -1,11 +1,15 @@
 import os
 import sqlite3
+import threading
+import asyncio
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler, 
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
 
+# Load environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DRIVER_GROUP_ID = os.getenv("DRIVER_GROUP_ID")
 ADMIN_GROUP_ID = os.getenv("ADMIN_GROUP_ID")
@@ -19,6 +23,8 @@ PACKAGES = {
     "pkg_10h": {"label": "10 Hours (Full Day)", "price": "120,000 MMK"},
     "pkg_24h": {"label": "24 Hours (1 Day)", "price": "250,000 MMK"}
 }
+
+# --- TELEGRAM BOT HANDLERS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard = [
@@ -169,47 +175,18 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Booking cancelled.")
     return ConversationHandler.END
 
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+# --- RENDER WEB SERVER & BOT INITIALIZATION ---
 
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start), CommandHandler("book", start)],
-        states={
-            CAR_TYPE: [CallbackQueryHandler(car_selected)],
-            PACKAGE: [CallbackQueryHandler(package_selected)],
-            LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, location_received)],
-            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, phone_received)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel)]
-    )
-
-    app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(accept_booking, pattern="^accept_"))
-    
-    app.run_polling()
-
-import os
-import threading
-from flask import Flask
-
-# 1. Create mini web app for Render port check
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
     return "Bot is active!"
 
-def run_web():
-    port = int(os.getenv("PORT", 10000))
-    web_app.run(host="0.0.0.0", port=port)
-
-if __name__ == "__main__":
-    # 2. Start web server thread FIRST
-    t = threading.Thread(target=run_web)
-    t.daemon = True
-    t.start()
-
-    # 3. Start Telegram Bot polling
+def start_telegram_bot():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
@@ -226,4 +203,11 @@ if __name__ == "__main__":
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(accept_booking, pattern="^accept_"))
     
-    app.run_polling()
+    app.run_polling(stop_signals=None)
+
+# Start bot thread background service
+threading.Thread(target=start_telegram_bot, daemon=True).start()
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 10000))
+    web_app.run(host="0.0.0.0", port=port)
