@@ -91,32 +91,38 @@ async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Notify Admin Group
     if ADMIN_GROUP_ID:
-        admin_text = (
-            f"🔔 **NEW BOOKING #{booking_id}**\n"
-            f"User: @{user.username if user.username else 'NoUsername'}\n"
-            f"Phone: {context.user_data['phone']}\n"
-            f"Car: {context.user_data['car_type']}\n"
-            f"Package: {context.user_data['package']}\n"
-            f"Pickup: {context.user_data['location']}"
-        )
-        await context.bot.send_message(chat_id=int(ADMIN_GROUP_ID), text=admin_text, parse_mode="Markdown")
+        try:
+            admin_text = (
+                f"🔔 **NEW BOOKING #{booking_id}**\n"
+                f"User: @{user.username if user.username else 'NoUsername'}\n"
+                f"Phone: {context.user_data['phone']}\n"
+                f"Car: {context.user_data['car_type']}\n"
+                f"Package: {context.user_data['package']}\n"
+                f"Pickup: {context.user_data['location']}"
+            )
+            await context.bot.send_message(chat_id=int(ADMIN_GROUP_ID), text=admin_text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Admin Group Error: {e}")
 
     # Broadcast to Driver Dispatch Group
     if DRIVER_GROUP_ID:
-        driver_text = (
-            f"🚕 **NEW TRIP REQUEST #{booking_id}**\n\n"
-            f"• Vehicle: {context.user_data['car_type']}\n"
-            f"• Package: {context.user_data['package']}\n"
-            f"• Fare: {context.user_data['price']}\n"
-            f"• Location: {context.user_data['location']}"
-        )
-        keyboard = [[InlineKeyboardButton("✅ Accept Job", callback_data=f"accept_{booking_id}")]]
-        await context.bot.send_message(
-            chat_id=int(DRIVER_GROUP_ID),
-            text=driver_text,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        try:
+            driver_text = (
+                f"🚕 **NEW TRIP REQUEST #{booking_id}**\n\n"
+                f"• Vehicle: {context.user_data['car_type']}\n"
+                f"• Package: {context.user_data['package']}\n"
+                f"• Fare: {context.user_data['price']}\n"
+                f"• Location: {context.user_data['location']}"
+            )
+            keyboard = [[InlineKeyboardButton("✅ Accept Job", callback_data=f"accept_{booking_id}")]]
+            await context.bot.send_message(
+                chat_id=int(DRIVER_GROUP_ID),
+                text=driver_text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception as e:
+            print(f"Driver Group Error: {e}")
 
     return ConversationHandler.END
 
@@ -153,23 +159,32 @@ async def accept_booking(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer("Job accepted successfully!")
     
     # Update Driver Dispatch Group
-    await query.edit_message_text(
-        text=f"✅ **JOB #{booking_id} TAKEN**\nDriver: {driver_handle}",
-        parse_mode="Markdown"
-    )
+    try:
+        await query.edit_message_text(
+            text=f"✅ **JOB #{booking_id} TAKEN**\nDriver: {driver_handle}",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        print(f"Driver Update Error: {e}")
 
     # Notify Customer
-    await context.bot.send_message(
-        chat_id=customer_id,
-        text=f"🚖 **Driver Found!**\nYour booking #{booking_id} was accepted by driver {driver_handle}. They will call you soon."
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=customer_id,
+            text=f"🚖 **Driver Found!**\nYour booking #{booking_id} was accepted by driver {driver_handle}. They will call you soon."
+        )
+    except Exception as e:
+        print(f"Customer Notify Error: {e}")
 
     # Notify Admin Group
     if ADMIN_GROUP_ID:
-        await context.bot.send_message(
-            chat_id=int(ADMIN_GROUP_ID),
-            text=f"ℹ️ Booking #{booking_id} accepted by driver {driver_handle}. Customer Phone: {phone}"
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=int(ADMIN_GROUP_ID),
+                text=f"ℹ️ Booking #{booking_id} accepted by driver {driver_handle}. Customer Phone: {phone}"
+            )
+        except Exception as e:
+            print(f"Admin Notify Error: {e}")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Booking cancelled.")
