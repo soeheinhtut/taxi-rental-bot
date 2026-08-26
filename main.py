@@ -2,6 +2,7 @@ import os
 import logging
 from datetime import datetime
 from fastapi import FastAPI, Request
+app = FastAPI()
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
