@@ -405,10 +405,10 @@ async def wallet_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"Usage error: /wallet_add <DRIVER_TELEGRAM_ID> <AMOUNT>\nError: {e}")
 
 # --- WEBHOOK & APP SETUP ---
-app_fastapi = FastAPI()
+app = FastAPI()
 telegram_app = None
 
-@app_fastapi.on_event("startup")
+@app.on_event("startup")
 async def startup_event():
     global telegram_app
     await init_db()
@@ -416,7 +416,10 @@ async def startup_event():
     telegram_app = Application.builder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")
+        ],
         states={
             VEHICLE: [CallbackQueryHandler(vehicle_chosen)],
             DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, date_received)],
@@ -439,7 +442,6 @@ async def startup_event():
     telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)"))
     telegram_app.add_handler(CommandHandler("wallet_add", wallet_add_command))
 
-    # CRITICAL: Properly initialize and start the app for webhooks
     await telegram_app.initialize()
 
     if RUN_MODE == "webhook":
@@ -449,7 +451,7 @@ async def startup_event():
         import asyncio
         asyncio.create_task(telegram_app.run_polling())
 
-@app_fastapi.post("/telegram")
+@app.post("/telegram")
 async def webhook_endpoint(request: Request):
     if RUN_MODE == "webhook":
         data = await request.json()
@@ -457,6 +459,6 @@ async def webhook_endpoint(request: Request):
         await telegram_app.process_update(update)
     return {"status": "ok"}
 
-@app_fastapi.get("/")
+@app.get("/")
 def home():
     return {"status": "Bot is active!"}
