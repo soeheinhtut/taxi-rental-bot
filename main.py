@@ -14,8 +14,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Environment Configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Matches Render key
-ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))  # Updated from ADMIN_CHAT_ID
+BOT_TOKEN = os.getenv("BOT_TOKEN")  
+ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))  
 DRIVER_GROUP_ID = int(os.getenv("DRIVER_GROUP_ID", "0"))
 WALLET_GROUP_ID = int(os.getenv("WALLET_GROUP_ID", "0"))
 RUN_MODE = os.getenv("RUN_MODE", "polling")
@@ -411,7 +411,14 @@ telegram_app = None
 @app.on_event("startup")
 async def startup_event():
     global telegram_app
-    await init_db()
+    
+    # Try to connect to database. It will not crash now if it fails.
+    try:
+        await init_db()
+        logger.info("Database connected successfully!")
+    except Exception as e:
+        logger.error(f"Database Connection Failed: {e}")
+        logger.error("PLEASE ADD YOUR REMOTE DATABASE_URL IN RENDER ENVIRONMENT VARIABLES!")
     
     telegram_app = Application.builder().token(BOT_TOKEN).build()
     
