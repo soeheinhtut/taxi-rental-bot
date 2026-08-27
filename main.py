@@ -15,9 +15,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Environment Configuration
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Matches Render key
+ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))  # Updated from ADMIN_CHAT_ID
 DRIVER_GROUP_ID = int(os.getenv("DRIVER_GROUP_ID", "0"))
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0"))
+WALLET_GROUP_ID = int(os.getenv("WALLET_GROUP_ID", "0"))
 RUN_MODE = os.getenv("RUN_MODE", "polling")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
