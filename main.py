@@ -2,7 +2,6 @@ import os
 import logging
 from datetime import datetime
 from fastapi import FastAPI, Request
-app = FastAPI()
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
@@ -88,7 +87,6 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await query.answer()
     context.user_data['hours'] = int(query.data)
     
-    # Request GPS Location using native Telegram button
     location_keyboard = ReplyKeyboardMarkup(
         [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
         one_time_keyboard=True,
@@ -157,7 +155,6 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     file_id = photo_file.file_id
     context.user_data['receipt_file_id'] = file_id
     
-    # Save Booking to DB with status PAYMENT_REVIEW
     booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}"
     data = context.user_data
     
@@ -181,8 +178,7 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
     await update.message.reply_text(f"✅ Receipt uploaded successfully! Your Booking ID is **{booking_id}**. Pending Admin Approval.", parse_mode="Markdown")
     
-    # Notify Admin for Payment Approval
-    if ADMIN_CHAT_ID:
+    if ADMIN_GROUP_ID:
         admin_text = (
             f"💳 **PAYMENT REVIEW**\n\n"
             f"Booking: `{booking_id}`\n"
@@ -195,7 +191,7 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
              InlineKeyboardButton("❌ Reject Payment", callback_data=f"reject_pay_{booking_id}")]
         ]
         await context.bot.send_photo(
-            chat_id=ADMIN_CHAT_ID,
+            chat_id=ADMIN_GROUP_ID,
             photo=file_id,
             caption=admin_text,
             parse_mode="Markdown",
@@ -220,7 +216,7 @@ async def driver_register_callback(update: Update, context: ContextTypes.DEFAULT
             
     await query.edit_message_text("📝 Registration request sent to admin. Please wait for approval.")
     
-    if ADMIN_CHAT_ID:
+    if ADMIN_GROUP_ID:
         text = (
             f"👨‍✈️ **DRIVER REGISTRATION**\n\n"
             f"Name: {user.first_name}\n"
@@ -228,7 +224,7 @@ async def driver_register_callback(update: Update, context: ContextTypes.DEFAULT
             f"Telegram ID: `{user.id}`"
         )
         keyboard = [[InlineKeyboardButton("✅ Approve Driver", callback_data=f"approve_driver_{user.id}")]]
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -255,7 +251,6 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 booking.status = "AVAILABLE"
                 await session.commit()
                 
-                # Broadcast to Driver Dispatch Group
                 if DRIVER_GROUP_ID:
                     driver_text = (
                         f"🚗 **NEW HOURLY RENTAL**\n\n"
@@ -291,7 +286,6 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     b_id = query.data.split("_")[1]
     
     async with AsyncSessionLocal() as session:
-        # Check if driver is registered and approved
         d_res = await session.execute(select(Driver).where(Driver.telegram_id == driver_user.id))
         driver = d_res.scalar_one_or_none()
         
@@ -303,7 +297,6 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer(f"❌ Insufficient wallet balance ({driver.wallet_balance:,.0f} MMK). Minimum required: {MIN_WALLET_MMK:,.0f} MMK. Top up required!", show_alert=True)
             return
 
-        # Atomic Row Lock using PostgreSQL SELECT ... FOR UPDATE
         b_res = await session.execute(select(Booking).where(Booking.id == b_id).with_for_update())
         booking = b_res.scalar_one_or_none()
         
@@ -311,15 +304,12 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Sorry, this job was already taken or is no longer available!", show_alert=True)
             return
             
-        # Deduct Commission from Driver Wallet
         driver.wallet_balance -= DRIVER_COMMISSION_MMK
         
-        # Lock Booking Assignment
         booking.status = "ASSIGNED"
         booking.driver_id = driver.telegram_id
         booking.driver_name = driver.name
         
-        # Log Wallet Transaction
         tx = WalletTransaction(
             driver_telegram_id=driver.telegram_id,
             amount=-DRIVER_COMMISSION_MMK,
@@ -332,13 +322,11 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     driver_handle = f"@{driver_user.username}" if driver_user.username else driver_user.name
     await query.answer("✅ Job accepted successfully!")
     
-    # Update Dispatch Group message
     await query.edit_message_text(
         text=f"✅ **JOB #{b_id} TAKEN**\nDriver: {driver_handle}\nWallet Balance: {driver.wallet_balance:,.0f} MMK",
         parse_mode="Markdown"
     )
     
-    # Notify Customer with Lifecycle Actions
     kb = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]]
     await context.bot.send_message(
         chat_id=booking.customer_id,
@@ -346,7 +334,6 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     
-    # Send control options to driver in private message
     await context.bot.send_message(
         chat_id=driver_user.id,
         text=f"📋 **Trip Management Dashboard for #{b_id}**",
@@ -383,7 +370,6 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             booking.status = "TRIP_COMPLETED"
             await session.commit()
             
-            # Simple overtime mock simulation check (e.g., 5,000 MMK extra charge per overtime hour if applicable)
             overtime_hours = 0 
             extra_charge = overtime_hours * 5000
             total_payable = booking.fare_mmk + extra_charge
@@ -397,7 +383,7 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- ADMIN WALLET TOP UP COMMAND ---
 async def wallet_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
+    if update.effective_user.id != ADMIN_GROUP_ID:
         return
     try:
         args = context.args
@@ -429,7 +415,6 @@ async def startup_event():
     
     telegram_app = Application.builder().token(BOT_TOKEN).build()
     
-    # Register Conversations & Handlers
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -454,29 +439,24 @@ async def startup_event():
     telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)"))
     telegram_app.add_handler(CommandHandler("wallet_add", wallet_add_command))
 
+    # CRITICAL: Properly initialize and start the app for webhooks
+    await telegram_app.initialize()
+
     if RUN_MODE == "webhook":
+        await telegram_app.start()
         await telegram_app.bot.set_webhook(url=f"{WEBHOOK_URL}/telegram", secret_token=WEBHOOK_SECRET)
     else:
-        # Polling mode for local test run
         import asyncio
         asyncio.create_task(telegram_app.run_polling())
 
 @app_fastapi.post("/telegram")
 async def webhook_endpoint(request: Request):
     if RUN_MODE == "webhook":
-        from telegram import Update
         data = await request.json()
         update = Update.de_json(data, telegram_app.bot)
         await telegram_app.process_update(update)
     return {"status": "ok"}
 
 @app_fastapi.get("/")
-def home():
-    return {"status": "Bot is active!"}
-
-# ... (all your other bot handlers, conversations, and webhook endpoints go above) ...
-
-# --- HOME ROUTE FOR HEALTH PINGS / UPTIMEROBOT ---
-@app.get("/")
 def home():
     return {"status": "Bot is active!"}
