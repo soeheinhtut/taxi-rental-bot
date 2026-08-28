@@ -13,22 +13,30 @@ from database import AsyncSessionLocal, Booking, Driver, WalletTransaction, init
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Environment Configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN")  
 ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))  
 DRIVER_GROUP_ID = int(os.getenv("DRIVER_GROUP_ID", "0"))
-WALLET_GROUP_ID = int(os.getenv("WALLET_GROUP_ID", "0"))
 RUN_MODE = os.getenv("RUN_MODE", "polling")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
-DRIVER_COMMISSION_MMK = float(os.getenv("DRIVER_COMMISSION_MMK", "2000"))
-MIN_WALLET_MMK = float(os.getenv("MIN_WALLET_MMK", "2000"))
+
+# 1 Point per job commission & Minimum required balance
+DRIVER_COMMISSION_POINTS = 1.0
+MIN_WALLET_POINTS = 1.0
+MMK_PER_POINT = 1000  # 1 Point = 1,000 MMK
+
+# Top-Up Packages
+TOPUP_PACKAGES = {
+    "pkg_10": {"points": 10, "price": 10 * MMK_PER_POINT},
+    "pkg_50": {"points": 50, "price": 50 * MMK_PER_POINT},
+    "pkg_100": {"points": 100, "price": 100 * MMK_PER_POINT},
+    "pkg_1000": {"points": 1000, "price": 1000 * MMK_PER_POINT},
+}
 
 # Conversation States
 VEHICLE, DATE, TIME, HOURS, LOCATION, PASSENGERS, PAYMENT_RECEIPT = range(7)
-
-# Driver Registration States
 D_NAME, D_VEHICLE, D_PLATE = range(7, 10)
+TOPUP_PKG, TOPUP_RECEIPT = range(10, 12)
 
 PACKAGES = {
     "Sedan": {"fare": 45000},
@@ -36,14 +44,19 @@ PACKAGES = {
     "Alphard / VIP": {"fare": 100000}
 }
 
-# --- CUSTOMER BOOKING FLOW ---
+app = FastAPI()
+telegram_app = None
+
+# --- START & MAIN MENU ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
         return ConversationHandler.END
     
     keyboard = [
         [InlineKeyboardButton("🚗 Book a Car", callback_data="start_booking")],
-        [InlineKeyboardButton("👨‍✈️ Driver Register", callback_data="driver_register")]
+        [InlineKeyboardButton("👨‍✈️ Driver Register", callback_data="driver_register")],
+        [InlineKeyboardButton("💳 Driver Top Up", callback_data="topup_start")],
+        [InlineKeyboardButton("💰 Check Balance", callback_data="driver_balance")]
     ]
     await update.message.reply_text(
         "Welcome to Taxi Rental Service! Please choose an option:",
@@ -51,6 +64,45 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return ConversationHandler.END
 
+# --- CHECK BALANCE FUNCTION ---
+async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(select(Driver).where(Driver.telegram_id == query.from_user.id))
+        driver = res.scalar_one_or_none()
+        
+        if not driver or not driver.is_approved:
+            await query.edit_message_text("❌ You are not an approved driver yet.")
+            return
+
+        await query.edit_message_text(
+            f"👤 **Driver Wallet Status**\n\n"
+            f"Name: {driver.name}\n"
+            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
+            f"*(1 Job = {DRIVER_COMMISSION_POINTS} Point deduction)*",
+            parse_mode="Markdown"
+        )
+
+async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(select(Driver).where(Driver.telegram_id == update.effective_user.id))
+        driver = res.scalar_one_or_none()
+        
+        if not driver or not driver.is_approved:
+            await update.message.reply_text("❌ You are not an approved driver yet.")
+            return
+
+        await update.message.reply_text(
+            f"👤 **Driver Wallet Status**\n\n"
+            f"Name: {driver.name}\n"
+            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
+            f"*(1 Job = {DRIVER_COMMISSION_POINTS} Point deduction)*",
+            parse_mode="Markdown"
+        )
+
+# --- CUSTOMER BOOKING FLOW ---
 async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -103,20 +155,12 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location
-    if loc:
-        context.user_data['location'] = f"{loc.latitude}, {loc.longitude}"
-    else:
-        context.user_data['location'] = update.message.text
-
-    await update.message.reply_text(
-        "👥 How many passengers will be riding?",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    context.user_data['location'] = f"{loc.latitude}, {loc.longitude}" if loc else update.message.text
+    await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
 
 async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['passengers'] = update.message.text
-    
     data = context.user_data
     summary = (
         f"🧾 **BOOKING SUMMARY**\n\n"
@@ -129,9 +173,7 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"💰 Total Fare: {data['fare']:,} MMK\n\n"
         f"Please choose your payment method:"
     )
-    keyboard = [
-        [InlineKeyboardButton("KBZPay / WavePay", callback_data="pay_kbzwave")]
-    ]
+    keyboard = [[InlineKeyboardButton("KBZPay / WavePay", callback_data="pay_kbzwave")]]
     await update.message.reply_text(summary, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     return PAYMENT_RECEIPT
 
@@ -143,7 +185,7 @@ async def payment_method_chosen(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(
         "💳 **Payment Instructions**\n\n"
         "Please transfer total amount to:\n"
-        "• KBZPay / WavePay: `09-912345678` (Demo Account)\n\n"
+        "• KBZPay / WavePay: `09-912345678`\n\n"
         "📸 **After transferring, please upload a screenshot of your payment receipt.**",
         parse_mode="Markdown"
     )
@@ -156,8 +198,6 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
     photo_file = await update.message.photo[-1].get_file()
     file_id = photo_file.file_id
-    context.user_data['receipt_file_id'] = file_id
-    
     booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}"
     data = context.user_data
     
@@ -194,13 +234,7 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 [InlineKeyboardButton("✅ Approve Payment", callback_data=f"approve_pay_{booking_id}"),
                  InlineKeyboardButton("❌ Reject Payment", callback_data=f"reject_pay_{booking_id}")]
             ]
-            await context.bot.send_photo(
-                chat_id=ADMIN_GROUP_ID,
-                photo=file_id,
-                caption=admin_text,
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=file_id, caption=admin_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             logger.error(f"Failed to send to ADMIN_GROUP_ID: {e}")
         
@@ -232,13 +266,7 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
         res = await session.execute(select(Driver).where(Driver.telegram_id == user.id))
         driver = res.scalar_one_or_none()
         if not driver:
-            driver = Driver(
-                telegram_id=user.id, 
-                name=data['driver_name'], 
-                username=user.username, 
-                wallet_balance=0.0, 
-                is_approved=False
-            )
+            driver = Driver(telegram_id=user.id, name=data['driver_name'], username=user.username, wallet_balance=0.0, is_approved=False)
             session.add(driver)
         else:
             driver.name = data['driver_name']
@@ -253,13 +281,97 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 f"👤 Name: {data['driver_name']}\n"
                 f"🚙 Vehicle: {data['driver_vehicle']}\n"
                 f"🔢 Plate Number: `{plate_number}`\n"
-                f"🏷 Username: @{user.username if user.username else 'None'}\n"
                 f"🆔 Telegram ID: `{user.id}`"
             )
             keyboard = [[InlineKeyboardButton("✅ Approve Driver", callback_data=f"approve_driver_{user.id}")]]
             await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
-            logger.error(f"Failed to send driver registration to ADMIN_GROUP_ID: {e}")
+            logger.error(f"Failed to send driver registration: {e}")
+            
+    return ConversationHandler.END
+
+# --- DRIVER PACKAGE TOP UP FLOW ---
+async def topup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(select(Driver).where(Driver.telegram_id == query.from_user.id))
+        driver = res.scalar_one_or_none()
+        
+        if not driver or not driver.is_approved:
+            await query.edit_message_text("❌ You are not an approved driver yet.")
+            return ConversationHandler.END
+
+    keyboard = [
+        [InlineKeyboardButton("10 Points (10,000 MMK)", callback_data="pkg_10"),
+         InlineKeyboardButton("50 Points (50,000 MMK)", callback_data="pkg_50")],
+        [InlineKeyboardButton("100 Points (100,000 MMK)", callback_data="pkg_100"),
+         InlineKeyboardButton("1,000 Points (1,000,000 MMK)", callback_data="pkg_1000")]
+    ]
+    await query.edit_message_text(
+        f"💳 **Driver Wallet Top-Up**\n\n"
+        f"Current Balance: {driver.wallet_balance:,.0f} Points\n"
+        f"Exchange Rule: `1 Point = {MMK_PER_POINT:,} MMK`\n\n"
+        f"📦 **Please select a top-up package:**",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return TOPUP_PKG
+
+async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    
+    pkg_key = query.data
+    if pkg_key not in TOPUP_PACKAGES:
+        await query.edit_message_text("❌ Invalid package selected.")
+        return ConversationHandler.END
+        
+    pkg = TOPUP_PACKAGES[pkg_key]
+    context.user_data['topup_points'] = pkg["points"]
+    context.user_data['topup_price'] = pkg["price"]
+    
+    await query.edit_message_text(
+        f"💳 **Top-Up Package Selected: {pkg['points']} Points**\n\n"
+        f"Total Price to Pay: **{pkg['price']:,} MMK**\n\n"
+        f"Please transfer money to:\n"
+        f"• KBZPay / WavePay: `09-912345678`\n\n"
+        f"📸 **After paying, please upload a screenshot of your payment receipt.**",
+        parse_mode="Markdown"
+    )
+    return TOPUP_RECEIPT
+
+async def topup_receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message.photo:
+        await update.message.reply_text("Please upload a photo image of your payment receipt.")
+        return TOPUP_RECEIPT
+        
+    photo_file = await update.message.photo[-1].get_file()
+    file_id = photo_file.file_id
+    user = update.message.from_user
+    
+    points = context.user_data.get('topup_points', 0)
+    price = context.user_data.get('topup_price', 0)
+
+    await update.message.reply_text("✅ Receipt uploaded successfully! Pending Admin Approval.", parse_mode="Markdown")
+
+    if ADMIN_GROUP_ID:
+        try:
+            caption = (
+                f"💰 **DRIVER TOP-UP REQUEST**\n\n"
+                f"👤 Driver ID: `{user.id}`\n"
+                f"🏷 Username: @{user.username if user.username else 'None'}\n"
+                f"📦 Package: **{points} Points**\n"
+                f"💵 Amount Paid: **{price:,.0f} MMK**"
+            )
+            keyboard = [
+                [InlineKeyboardButton(f"✅ Approve (+{points} Pts)", callback_data=f"tapp_{user.id}_{points}"),
+                 InlineKeyboardButton("❌ Reject", callback_data=f"trej_{user.id}")]
+            ]
+            await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=file_id, caption=caption, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            logger.error(f"Failed to send topup receipt: {e}")
             
     return ConversationHandler.END
 
@@ -278,18 +390,40 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 driver.is_approved = True
                 await session.commit()
         
-        # FIX 1: Change edit_message_caption to edit_message_text
         await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED")
-        
-        # FIX 2: Create invite link to add driver to group
         try:
             invite_link = await context.bot.create_chat_invite_link(chat_id=DRIVER_GROUP_ID, member_limit=1)
             join_msg = f"🎉 Your driver account is approved!\n\nPlease join the Driver Group here: {invite_link.invite_link}"
-        except Exception as e:
-            logger.error(f"Failed to create invite link: {e}")
-            join_msg = "🎉 Your driver account is approved! (Please ask admin for the Driver Group link)."
-            
+        except Exception:
+            join_msg = "🎉 Your driver account is approved!"
         await context.bot.send_message(chat_id=d_id, text=join_msg)
+
+    elif data.startswith("tapp_"):
+        parts = data.split("_")
+        d_id = int(parts[1])
+        points_to_add = float(parts[2])
+        
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(select(Driver).where(Driver.telegram_id == d_id))
+            driver = res.scalar_one_or_none()
+            if driver:
+                driver.wallet_balance += points_to_add
+                tx = WalletTransaction(driver_telegram_id=d_id, amount=points_to_add, type="TOP_UP")
+                session.add(tx)
+                await session.commit()
+                new_balance = driver.wallet_balance
+                
+        await query.edit_message_caption(caption=query.message.caption + f"\n\n✅ **APPROVED (+{points_to_add:,.0f} POINTS)**", parse_mode="Markdown")
+        await context.bot.send_message(
+            chat_id=d_id, 
+            text=f"✅ **Top-up Approved!**\nAdmin added **{points_to_add:,.0f} Points** to your wallet.\nNew Balance: **{new_balance:,.0f} Points**", 
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("trej_"):
+        d_id = int(data.split("_")[1])
+        await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **TOP-UP REJECTED**", parse_mode="Markdown")
+        await context.bot.send_message(chat_id=d_id, text="❌ Your wallet top-up request was rejected by the admin.")
 
     elif data.startswith("approve_pay_"):
         b_id = data.split("_")[2]
@@ -304,22 +438,18 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     try:
                         driver_text = (
                             f"🚗 **NEW HOURLY RENTAL**\n\n"
-                            f"🆔 `{booking.id}`\n\n"
-                            f"📅 {booking.date_str}\n"
-                            f"🕐 {booking.time_str}\n"
-                            f"⏱ {booking.hours} Hours\n\n"
-                            f"📍 GPS: {booking.location}\n"
-                            f"👥 Passengers: {booking.passengers}\n"
-                            f"🚙 Vehicle: {booking.vehicle}\n\n"
+                            f"🆔 `{booking.id}`\n"
+                            f"📅 {booking.date_str} | 🕐 {booking.time_str}\n"
+                            f"⏱ {booking.hours} Hours | 👥 {booking.passengers} Pax\n"
+                            f"🚙 Vehicle: {booking.vehicle}\n"
                             f"💰 Fare: {booking.fare_mmk:,.0f} MMK\n"
-                            f"➕ Commission Deduction: {DRIVER_COMMISSION_MMK:,.0f} MMK"
+                            f"➕ Commission Deduction: **{DRIVER_COMMISSION_POINTS} Point**"
                         )
                         kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]]
                         await context.bot.send_message(chat_id=DRIVER_GROUP_ID, text=driver_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
-                    except Exception as e:
-                        logger.error(f"Failed to send job broadcast to DRIVER_GROUP_ID: {e}")
-                    
-        await query.edit_message_caption(caption=query.message.caption + "\n\n✅ **PAYMENT APPROVED & BROADCASTED**", parse_mode="Markdown")
+                    except Exception:
+                        pass
+        await query.edit_message_caption(caption=query.message.caption + "\n\n✅ **PAYMENT APPROVED**", parse_mode="Markdown")
 
     elif data.startswith("reject_pay_"):
         b_id = data.split("_")[2]
@@ -331,7 +461,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.commit()
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **PAYMENT REJECTED**", parse_mode="Markdown")
 
-# --- ATOMIC JOB LOCKING & WALLET CHECK ---
+# --- ACCEPT JOB (DEDUCTS 1 POINT) ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     driver_user = query.from_user
@@ -345,54 +475,39 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ You are not an approved driver yet!", show_alert=True)
             return
             
-        if driver.wallet_balance < MIN_WALLET_MMK:
-            await query.answer(f"❌ Insufficient wallet balance ({driver.wallet_balance:,.0f} MMK). Minimum required: {MIN_WALLET_MMK:,.0f} MMK. Top up required!", show_alert=True)
+        if driver.wallet_balance < MIN_WALLET_POINTS:
+            await query.answer(f"❌ Insufficient points ({driver.wallet_balance:,.0f}). Minimum required: {MIN_WALLET_POINTS} Point. Top up needed!", show_alert=True)
             return
 
         b_res = await session.execute(select(Booking).where(Booking.id == b_id).with_for_update())
         booking = b_res.scalar_one_or_none()
         
         if not booking or booking.status != "AVAILABLE":
-            await query.answer("❌ Sorry, this job was already taken or is no longer available!", show_alert=True)
+            await query.answer("❌ Sorry, this job is no longer available!", show_alert=True)
             return
             
-        driver.wallet_balance -= DRIVER_COMMISSION_MMK
-        
+        # Deduct exactly 1 point per job
+        driver.wallet_balance -= DRIVER_COMMISSION_POINTS
         booking.status = "ASSIGNED"
         booking.driver_id = driver.telegram_id
         booking.driver_name = driver.name
         
         tx = WalletTransaction(
             driver_telegram_id=driver.telegram_id,
-            amount=-DRIVER_COMMISSION_MMK,
+            amount=-DRIVER_COMMISSION_POINTS,
             type="COMMISSION",
             booking_id=booking.id
         )
         session.add(tx)
         await session.commit()
         
-    driver_handle = f"@{driver_user.username}" if driver_user.username else driver_user.name
     await query.answer("✅ Job accepted successfully!")
-    
-    await query.edit_message_text(
-        text=f"✅ **JOB #{b_id} TAKEN**\nDriver: {driver_handle}\nWallet Balance: {driver.wallet_balance:,.0f} MMK",
-        parse_mode="Markdown"
-    )
+    await query.edit_message_text(text=f"✅ **JOB #{b_id} TAKEN**\nDriver: @{driver_user.username}\nRemaining Points: {driver.wallet_balance:,.0f}", parse_mode="Markdown")
     
     kb = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]]
-    await context.bot.send_message(
-        chat_id=booking.customer_id,
-        text=f"🚖 **Driver Found!**\nYour booking `{b_id}` was accepted by driver {driver_handle}.\n\nWhen the driver arrives, they will update status.",
-        parse_mode="Markdown"
-    )
-    
-    await context.bot.send_message(
-        chat_id=driver_user.id,
-        text=f"📋 **Trip Management Dashboard for #{b_id}**",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
+    await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **Driver Found!** Accepted by @{driver_user.username}.", parse_mode="Markdown")
+    await context.bot.send_message(chat_id=driver_user.id, text=f"📋 **Trip Management Dashboard for #{b_id}**", reply_markup=InlineKeyboardMarkup(kb))
 
-# --- TRIP LIFECYCLE & OVERTIME ---
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -409,76 +524,36 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await session.commit()
             kb = [[InlineKeyboardButton("▶️ Start Trip", callback_data=f"starttrip_{b_id}")]]
             await query.edit_message_text(text=f"📍 **JOB #{b_id}**\nStatus: Driver Arrived", reply_markup=InlineKeyboardMarkup(kb))
-            await context.bot.send_message(chat_id=booking.customer_id, text=f"📍 Your driver has arrived at the pickup location for booking `{b_id}`.", parse_mode="Markdown")
+            await context.bot.send_message(chat_id=booking.customer_id, text=f"📍 Your driver has arrived.")
 
         elif action == "starttrip":
             booking.status = "TRIP_STARTED"
             await session.commit()
             kb = [[InlineKeyboardButton("🏁 End Trip", callback_data=f"endtrip_{b_id}")]]
             await query.edit_message_text(text=f"▶️ **JOB #{b_id}**\nStatus: Trip Started", reply_markup=InlineKeyboardMarkup(kb))
-            await context.bot.send_message(chat_id=booking.customer_id, text=f"▶️ Your rental trip `{b_id}` has officially started.", parse_mode="Markdown")
+            await context.bot.send_message(chat_id=booking.customer_id, text=f"▶️ Your trip has started.")
 
         elif action == "endtrip":
             booking.status = "TRIP_COMPLETED"
             await session.commit()
-            
-            overtime_hours = 0 
-            extra_charge = overtime_hours * 5000
-            total_payable = booking.fare_mmk + extra_charge
-            
             await query.edit_message_text(text=f"🏁 **JOB #{b_id}**\nStatus: Completed Successfully!")
-            await context.bot.send_message(
-                chat_id=booking.customer_id,
-                text=f"🏁 **Rental Completed!**\nBooking: `{b_id}`\nBase Fare: {booking.fare_mmk:,.0f} MMK\nOvertime Charges: {extra_charge:,.0f} MMK\nTotal Due: {total_payable:,.0f} MMK\n\nThank you for riding with us!",
-                parse_mode="Markdown"
-            )
+            await context.bot.send_message(chat_id=booking.customer_id, text=f"🏁 **Rental Completed!** Thank you for riding with us!")
 
-# --- ADMIN WALLET TOP UP COMMAND ---
-async def wallet_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_GROUP_ID:
-        return
-    try:
-        args = context.args
-        target_telegram_id = int(args[0])
-        amount = float(args[1])
-        
-        async with AsyncSessionLocal() as session:
-            res = await session.execute(select(Driver).where(Driver.telegram_id == target_telegram_id))
-            driver = res.scalar_one_or_none()
-            if driver:
-                driver.wallet_balance += amount
-                tx = WalletTransaction(driver_telegram_id=driver.telegram_id, amount=amount, type="TOP_UP")
-                session.add(tx)
-                await session.commit()
-                await update.message.reply_text(f"✅ Successfully added {amount:,.0f} MMK to driver {driver.name}. New balance: {driver.wallet_balance:,.0f} MMK")
-            else:
-                await update.message.reply_text("❌ Driver not found in database.")
-    except Exception as e:
-        await update.message.reply_text(f"Usage error: /wallet_add <DRIVER_TELEGRAM_ID> <AMOUNT>\nError: {e}")
-
-# --- WEBHOOK & APP SETUP ---
-app = FastAPI()
-telegram_app = None
-
+# --- APP STARTUP ---
 @app.on_event("startup")
 async def startup_event():
     global telegram_app
-    
     try:
         await init_db()
         logger.info("Database connected successfully!")
     except Exception as e:
         logger.error(f"Database Connection Failed: {e}")
-        logger.error("PLEASE ADD YOUR REMOTE DATABASE_URL IN RENDER ENVIRONMENT VARIABLES!")
     
     telegram_app = Application.builder().token(BOT_TOKEN).build()
     
-    # Booking Conversation
+    # Customer Booking Conversation
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")
-        ],
+        entry_points=[CommandHandler("start", start), CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")],
         states={
             VEHICLE: [CallbackQueryHandler(vehicle_chosen)],
             DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, date_received)],
@@ -486,31 +561,40 @@ async def startup_event():
             HOURS: [CallbackQueryHandler(hours_chosen)],
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)],
             PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)],
-            PAYMENT_RECEIPT: [
-                CallbackQueryHandler(payment_method_chosen, pattern="^pay_kbzwave$"),
-                MessageHandler(filters.PHOTO, receipt_received)
-            ]
+            PAYMENT_RECEIPT: [CallbackQueryHandler(payment_method_chosen, pattern="^pay_kbzwave$"), MessageHandler(filters.PHOTO, receipt_received)]
         },
         fallbacks=[CommandHandler("start", start)]
     )
 
-    # Driver Registration Conversation
-    driver_conv_handler = ConversationHandler(
+    # Driver Registration Flow
+    driver_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(driver_register_start, pattern="^driver_register$")],
         states={
             D_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_name_received)],
             D_VEHICLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_vehicle_received)],
-            D_PLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_plate_received)],
+            D_PLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_plate_received)]
+        },
+        fallbacks=[CommandHandler("start", start)]
+    )
+
+    # Driver Package Top-Up Flow
+    topup_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(topup_start, pattern="^topup_start$")],
+        states={
+            TOPUP_PKG: [CallbackQueryHandler(topup_package_chosen, pattern="^pkg_")],
+            TOPUP_RECEIPT: [MessageHandler(filters.PHOTO, topup_receipt_received)]
         },
         fallbacks=[CommandHandler("start", start)]
     )
     
     telegram_app.add_handler(conv_handler)
-    telegram_app.add_handler(driver_conv_handler)
-    telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|reject_)"))
+    telegram_app.add_handler(driver_conv)
+    telegram_app.add_handler(topup_conv)
+    telegram_app.add_handler(CommandHandler("balance", check_balance_command))
+    telegram_app.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^driver_balance$"))
+    telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|tapp_|trej_|approve_pay_|reject_pay_)"))
     telegram_app.add_handler(CallbackQueryHandler(accept_job, pattern="^accept_"))
     telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)"))
-    telegram_app.add_handler(CommandHandler("wallet_add", wallet_add_command))
 
     await telegram_app.initialize()
 
