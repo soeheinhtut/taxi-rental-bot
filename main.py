@@ -277,8 +277,19 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if driver:
                 driver.is_approved = True
                 await session.commit()
-        await query.edit_message_caption(caption=query.message.caption + "\n\n✅ **DRIVER APPROVED**", parse_mode="Markdown")
-        await context.bot.send_message(chat_id=d_id, text="🎉 Your driver account has been approved by admin! You can now accept trips.")
+        
+        # FIX 1: Change edit_message_caption to edit_message_text
+        await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED")
+        
+        # FIX 2: Create invite link to add driver to group
+        try:
+            invite_link = await context.bot.create_chat_invite_link(chat_id=DRIVER_GROUP_ID, member_limit=1)
+            join_msg = f"🎉 Your driver account is approved!\n\nPlease join the Driver Group here: {invite_link.invite_link}"
+        except Exception as e:
+            logger.error(f"Failed to create invite link: {e}")
+            join_msg = "🎉 Your driver account is approved! (Please ask admin for the Driver Group link)."
+            
+        await context.bot.send_message(chat_id=d_id, text=join_msg)
 
     elif data.startswith("approve_pay_"):
         b_id = data.split("_")[2]
@@ -453,7 +464,6 @@ telegram_app = None
 async def startup_event():
     global telegram_app
     
-    # Try to connect to database. It will not crash now if it fails.
     try:
         await init_db()
         logger.info("Database connected successfully!")
@@ -484,7 +494,7 @@ async def startup_event():
         fallbacks=[CommandHandler("start", start)]
     )
 
-    # New Driver Registration Conversation
+    # Driver Registration Conversation
     driver_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(driver_register_start, pattern="^driver_register$")],
         states={
