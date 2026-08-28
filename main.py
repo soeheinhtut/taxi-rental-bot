@@ -27,6 +27,9 @@ MIN_WALLET_MMK = float(os.getenv("MIN_WALLET_MMK", "2000"))
 # Conversation States
 VEHICLE, DATE, TIME, HOURS, LOCATION, PASSENGERS, PAYMENT_RECEIPT = range(7)
 
+# Driver Registration States
+D_NAME, D_VEHICLE, D_PLATE = range(7, 10)
+
 PACKAGES = {
     "Sedan": {"fare": 45000},
     "SUV": {"fare": 60000},
@@ -179,53 +182,88 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await update.message.reply_text(f"✅ Receipt uploaded successfully! Your Booking ID is **{booking_id}**. Pending Admin Approval.", parse_mode="Markdown")
     
     if ADMIN_GROUP_ID:
-        admin_text = (
-            f"💳 **PAYMENT REVIEW**\n\n"
-            f"Booking: `{booking_id}`\n"
-            f"Method: {data['payment_method']}\n"
-            f"Amount: {data['fare']:,} MMK\n"
-            f"Customer ID: {update.message.from_user.id}"
-        )
-        keyboard = [
-            [InlineKeyboardButton("✅ Approve Payment", callback_data=f"approve_pay_{booking_id}"),
-             InlineKeyboardButton("❌ Reject Payment", callback_data=f"reject_pay_{booking_id}")]
-        ]
-        await context.bot.send_photo(
-            chat_id=ADMIN_GROUP_ID,
-            photo=file_id,
-            caption=admin_text,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        try:
+            admin_text = (
+                f"💳 **PAYMENT REVIEW**\n\n"
+                f"Booking: `{booking_id}`\n"
+                f"Method: {data['payment_method']}\n"
+                f"Amount: {data['fare']:,} MMK\n"
+                f"Customer ID: {update.message.from_user.id}"
+            )
+            keyboard = [
+                [InlineKeyboardButton("✅ Approve Payment", callback_data=f"approve_pay_{booking_id}"),
+                 InlineKeyboardButton("❌ Reject Payment", callback_data=f"reject_pay_{booking_id}")]
+            ]
+            await context.bot.send_photo(
+                chat_id=ADMIN_GROUP_ID,
+                photo=file_id,
+                caption=admin_text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception as e:
+            logger.error(f"Failed to send to ADMIN_GROUP_ID: {e}")
         
     return ConversationHandler.END
 
-# --- DRIVER REGISTRATION ---
-async def driver_register_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- DRIVER REGISTRATION FLOW ---
+async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    user = query.from_user
+    await query.edit_message_text("📝 Please enter your **Full Name**:")
+    return D_NAME
+
+async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data['driver_name'] = update.message.text
+    await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model** (e.g., Toyota Crown / Sedan):")
+    return D_VEHICLE
+
+async def driver_vehicle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data['driver_vehicle'] = update.message.text
+    await update.message.reply_text("🔢 Please enter your **Car Plate Number** (e.g., 2A-1234):")
+    return D_PLATE
+
+async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.message.from_user
+    plate_number = update.message.text
+    data = context.user_data
     
     async with AsyncSessionLocal() as session:
         res = await session.execute(select(Driver).where(Driver.telegram_id == user.id))
         driver = res.scalar_one_or_none()
         if not driver:
-            driver = Driver(telegram_id=user.id, name=user.first_name, username=user.username, wallet_balance=0.0, is_approved=False)
+            driver = Driver(
+                telegram_id=user.id, 
+                name=data['driver_name'], 
+                username=user.username, 
+                wallet_balance=0.0, 
+                is_approved=False
+            )
             session.add(driver)
-            await session.commit()
-            
-    await query.edit_message_text("📝 Registration request sent to admin. Please wait for approval.")
+        else:
+            driver.name = data['driver_name']
+        await session.commit()
+        
+    await update.message.reply_text("✅ Registration details submitted! Please wait for admin approval.")
     
     if ADMIN_GROUP_ID:
-        text = (
-            f"👨‍✈️ **DRIVER REGISTRATION**\n\n"
-            f"Name: {user.first_name}\n"
-            f"Username: @{user.username if user.username else 'None'}\n"
-            f"Telegram ID: `{user.id}`"
-        )
-        keyboard = [[InlineKeyboardButton("✅ Approve Driver", callback_data=f"approve_driver_{user.id}")]]
-        await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        try:
+            text = (
+                f"👨‍✈️ **NEW DRIVER REGISTRATION**\n\n"
+                f"👤 Name: {data['driver_name']}\n"
+                f"🚙 Vehicle: {data['driver_vehicle']}\n"
+                f"🔢 Plate Number: `{plate_number}`\n"
+                f"🏷 Username: @{user.username if user.username else 'None'}\n"
+                f"🆔 Telegram ID: `{user.id}`"
+            )
+            keyboard = [[InlineKeyboardButton("✅ Approve Driver", callback_data=f"approve_driver_{user.id}")]]
+            await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            logger.error(f"Failed to send driver registration to ADMIN_GROUP_ID: {e}")
+            
+    return ConversationHandler.END
 
+# --- ADMIN ACTIONS ---
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -252,20 +290,23 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.commit()
                 
                 if DRIVER_GROUP_ID:
-                    driver_text = (
-                        f"🚗 **NEW HOURLY RENTAL**\n\n"
-                        f"🆔 `{booking.id}`\n\n"
-                        f"📅 {booking.date_str}\n"
-                        f"🕐 {booking.time_str}\n"
-                        f"⏱ {booking.hours} Hours\n\n"
-                        f"📍 GPS: {booking.location}\n"
-                        f"👥 Passengers: {booking.passengers}\n"
-                        f"🚙 Vehicle: {booking.vehicle}\n\n"
-                        f"💰 Fare: {booking.fare_mmk:,.0f} MMK\n"
-                        f"➕ Commission Deduction: {DRIVER_COMMISSION_MMK:,.0f} MMK"
-                    )
-                    kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]]
-                    await context.bot.send_message(chat_id=DRIVER_GROUP_ID, text=driver_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+                    try:
+                        driver_text = (
+                            f"🚗 **NEW HOURLY RENTAL**\n\n"
+                            f"🆔 `{booking.id}`\n\n"
+                            f"📅 {booking.date_str}\n"
+                            f"🕐 {booking.time_str}\n"
+                            f"⏱ {booking.hours} Hours\n\n"
+                            f"📍 GPS: {booking.location}\n"
+                            f"👥 Passengers: {booking.passengers}\n"
+                            f"🚙 Vehicle: {booking.vehicle}\n\n"
+                            f"💰 Fare: {booking.fare_mmk:,.0f} MMK\n"
+                            f"➕ Commission Deduction: {DRIVER_COMMISSION_MMK:,.0f} MMK"
+                        )
+                        kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]]
+                        await context.bot.send_message(chat_id=DRIVER_GROUP_ID, text=driver_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+                    except Exception as e:
+                        logger.error(f"Failed to send job broadcast to DRIVER_GROUP_ID: {e}")
                     
         await query.edit_message_caption(caption=query.message.caption + "\n\n✅ **PAYMENT APPROVED & BROADCASTED**", parse_mode="Markdown")
 
@@ -422,6 +463,7 @@ async def startup_event():
     
     telegram_app = Application.builder().token(BOT_TOKEN).build()
     
+    # Booking Conversation
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
@@ -441,9 +483,20 @@ async def startup_event():
         },
         fallbacks=[CommandHandler("start", start)]
     )
+
+    # New Driver Registration Conversation
+    driver_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(driver_register_start, pattern="^driver_register$")],
+        states={
+            D_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_name_received)],
+            D_VEHICLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_vehicle_received)],
+            D_PLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_plate_received)],
+        },
+        fallbacks=[CommandHandler("start", start)]
+    )
     
     telegram_app.add_handler(conv_handler)
-    telegram_app.add_handler(CallbackQueryHandler(driver_register_callback, pattern="^driver_register$"))
+    telegram_app.add_handler(driver_conv_handler)
     telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|reject_)"))
     telegram_app.add_handler(CallbackQueryHandler(accept_job, pattern="^accept_"))
     telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)"))
