@@ -34,9 +34,9 @@ TOPUP_PACKAGES = {
 }
 
 # Conversation States
-VEHICLE, DATE, TIME, HOURS, LOCATION, PASSENGERS, PAYMENT_RECEIPT = range(7)
-D_NAME, D_VEHICLE, D_PLATE = range(7, 10)
-TOPUP_PKG, TOPUP_RECEIPT = range(10, 12)
+VEHICLE, DATE, TIME, HOURS, LOCATION, PASSENGERS = range(6)
+D_NAME, D_VEHICLE, D_PLATE = range(6, 9)
+TOPUP_PKG, TOPUP_RECEIPT = range(9, 11)
 
 PACKAGES = {
     "Sedan": {"fare": 45000},
@@ -162,44 +162,22 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['passengers'] = update.message.text
     data = context.user_data
+    booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}"
+    
     summary = (
-        f"🧾 **BOOKING SUMMARY**\n\n"
+        f"✅ **BOOKING CONFIRMED**\n\n"
+        f"🆔 Booking ID: `{booking_id}`\n"
         f"🚙 Vehicle: {data['vehicle']}\n"
         f"📅 Date: {data['date']}\n"
         f"🕐 Time: {data['time']}\n"
         f"⏱ Hours: {data['hours']} Hours\n"
         f"📍 Location: {data['location']}\n"
-        f"👥 Passengers: {data['passengers']}\n"
-        f"💰 Total Fare: {data['fare']:,} MMK\n\n"
-        f"Please choose your payment method:"
+        f"👥 Passengers: {data['passengers']}\n\n"
+        f"💰 **Total Fare: {data['fare']:,} MMK (Pay directly to driver)**\n\n"
+        f"Searching for an available driver. You will be notified once a driver accepts your trip!"
     )
-    keyboard = [[InlineKeyboardButton("KBZPay / WavePay", callback_data="pay_kbzwave")]]
-    await update.message.reply_text(summary, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-    return PAYMENT_RECEIPT
-
-async def payment_method_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    context.user_data['payment_method'] = "KBZPay/WavePay"
     
-    await query.edit_message_text(
-        "💳 **Payment Instructions**\n\n"
-        "Please transfer total amount to:\n"
-        "• KBZPay / WavePay: `09-912345678`\n\n"
-        "📸 **After transferring, please upload a screenshot of your payment receipt.**",
-        parse_mode="Markdown"
-    )
-    return PAYMENT_RECEIPT
-
-async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message.photo:
-        await update.message.reply_text("Please upload a photo image of your payment receipt.")
-        return PAYMENT_RECEIPT
-        
-    photo_file = await update.message.photo[-1].get_file()
-    file_id = photo_file.file_id
-    booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}"
-    data = context.user_data
+    await update.message.reply_text(summary, parse_mode="Markdown")
     
     async with AsyncSessionLocal() as session:
         booking = Booking(
@@ -212,33 +190,32 @@ async def receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             location=data['location'],
             passengers=int(data['passengers']),
             fare_mmk=data['fare'],
-            status="PAYMENT_REVIEW",
-            payment_method=data['payment_method'],
-            payment_receipt_file_id=file_id
+            status="AVAILABLE",
+            payment_method="DIRECT",
+            payment_receipt_file_id=None
         )
         session.add(booking)
         await session.commit()
         
-    await update.message.reply_text(f"✅ Receipt uploaded successfully! Your Booking ID is **{booking_id}**. Pending Admin Approval.", parse_mode="Markdown")
-    
-    if ADMIN_GROUP_ID:
+    if DRIVER_GROUP_ID:
         try:
-            admin_text = (
-                f"💳 **PAYMENT REVIEW**\n\n"
-                f"Booking: `{booking_id}`\n"
-                f"Method: {data['payment_method']}\n"
-                f"Amount: {data['fare']:,} MMK\n"
-                f"Customer ID: {update.message.from_user.id}"
+            driver_text = (
+                f"🚗 **NEW HOURLY RENTAL**\n\n"
+                f"🆔 `{booking.id}`\n"
+                f"📅 {booking.date_str} | 🕐 {booking.time_str}\n"
+                f"⏱ {booking.hours} Hours | 👥 {booking.passengers} Pax\n"
+                f"📍 Location: {booking.location}\n"
+                f"🚙 Vehicle: {booking.vehicle}\n"
+                f"💰 Fare: **{booking.fare_mmk:,.0f} MMK** (Collect directly from customer)\n"
+                f"➕ Commission Deduction: **{DRIVER_COMMISSION_POINTS} Point**"
             )
-            keyboard = [
-                [InlineKeyboardButton("✅ Approve Payment", callback_data=f"approve_pay_{booking_id}"),
-                 InlineKeyboardButton("❌ Reject Payment", callback_data=f"reject_pay_{booking_id}")]
-            ]
-            await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=file_id, caption=admin_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]]
+            await context.bot.send_message(chat_id=DRIVER_GROUP_ID, text=driver_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
         except Exception as e:
-            logger.error(f"Failed to send to ADMIN_GROUP_ID: {e}")
-        
+            logger.error(f"Failed to send to DRIVER_GROUP_ID: {e}")
+            
     return ConversationHandler.END
+
 
 # --- DRIVER REGISTRATION FLOW ---
 async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -425,42 +402,6 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **TOP-UP REJECTED**", parse_mode="Markdown")
         await context.bot.send_message(chat_id=d_id, text="❌ Your wallet top-up request was rejected by the admin.")
 
-    elif data.startswith("approve_pay_"):
-        b_id = data.split("_")[2]
-        async with AsyncSessionLocal() as session:
-            res = await session.execute(select(Booking).where(Booking.id == b_id))
-            booking = res.scalar_one_or_none()
-            if booking and booking.status == "PAYMENT_REVIEW":
-                booking.status = "AVAILABLE"
-                await session.commit()
-                
-                if DRIVER_GROUP_ID:
-                    try:
-                        driver_text = (
-                            f"🚗 **NEW HOURLY RENTAL**\n\n"
-                            f"🆔 `{booking.id}`\n"
-                            f"📅 {booking.date_str} | 🕐 {booking.time_str}\n"
-                            f"⏱ {booking.hours} Hours | 👥 {booking.passengers} Pax\n"
-                            f"🚙 Vehicle: {booking.vehicle}\n"
-                            f"💰 Fare: {booking.fare_mmk:,.0f} MMK\n"
-                            f"➕ Commission Deduction: **{DRIVER_COMMISSION_POINTS} Point**"
-                        )
-                        kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]]
-                        await context.bot.send_message(chat_id=DRIVER_GROUP_ID, text=driver_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
-                    except Exception:
-                        pass
-        await query.edit_message_caption(caption=query.message.caption + "\n\n✅ **PAYMENT APPROVED**", parse_mode="Markdown")
-
-    elif data.startswith("reject_pay_"):
-        b_id = data.split("_")[2]
-        async with AsyncSessionLocal() as session:
-            res = await session.execute(select(Booking).where(Booking.id == b_id))
-            booking = res.scalar_one_or_none()
-            if booking:
-                booking.status = "CANCELLED"
-                await session.commit()
-        await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **PAYMENT REJECTED**", parse_mode="Markdown")
-
 # --- ACCEPT JOB (DEDUCTS 1 POINT) ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -505,7 +446,7 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text=f"✅ **JOB #{b_id} TAKEN**\nDriver: @{driver_user.username}\nRemaining Points: {driver.wallet_balance:,.0f}", parse_mode="Markdown")
     
     kb = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]]
-    await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **Driver Found!** Accepted by @{driver_user.username}.", parse_mode="Markdown")
+    await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **Driver Found!** Accepted by @{driver_user.username}. They will contact you shortly.", parse_mode="Markdown")
     await context.bot.send_message(chat_id=driver_user.id, text=f"📋 **Trip Management Dashboard for #{b_id}**", reply_markup=InlineKeyboardMarkup(kb))
 
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -560,8 +501,7 @@ async def startup_event():
             TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, time_received)],
             HOURS: [CallbackQueryHandler(hours_chosen)],
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)],
-            PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)],
-            PAYMENT_RECEIPT: [CallbackQueryHandler(payment_method_chosen, pattern="^pay_kbzwave$"), MessageHandler(filters.PHOTO, receipt_received)]
+            PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)]
         },
         fallbacks=[CommandHandler("start", start)]
     )
@@ -592,7 +532,7 @@ async def startup_event():
     telegram_app.add_handler(topup_conv)
     telegram_app.add_handler(CommandHandler("balance", check_balance_command))
     telegram_app.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^driver_balance$"))
-    telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|tapp_|trej_|approve_pay_|reject_pay_)"))
+    telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|tapp_|trej_)"))
     telegram_app.add_handler(CallbackQueryHandler(accept_job, pattern="^accept_"))
     telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)"))
 
