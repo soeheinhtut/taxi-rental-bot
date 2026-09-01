@@ -155,7 +155,11 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location
-    context.user_data['location'] = f"{loc.latitude}, {loc.longitude}" if loc else update.message.text
+    if loc:
+        context.user_data['location'] = f"{loc.latitude},{loc.longitude}"
+    else:
+        context.user_data['location'] = update.message.text
+
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
 
@@ -168,7 +172,7 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"📅 Date: {data['date']}\n"
         f"🕐 Time: {data['time']}\n"
         f"⏱ Hours: {data['hours']} Hours\n"
-        f"📍 Location: {data['location']}\n"
+        f"📍 Location: `{data['location']}`\n"
         f"👥 Passengers: {data['passengers']}\n"
         f"💰 Total Fare: {data['fare']:,} MMK\n\n"
         f"Please choose your payment method:"
@@ -461,7 +465,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.commit()
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **PAYMENT REJECTED**", parse_mode="Markdown")
 
-# --- ACCEPT JOB (DEDUCTS 1 POINT & SENDS PRIVATE DETAILS TO DRIVER) ---
+# --- ACCEPT JOB (DEDUCTS POINT & SENDS LOCATION + DETAILS PRIVATELY) ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     driver_user = query.from_user
@@ -486,7 +490,7 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Sorry, this job is no longer available!", show_alert=True)
             return
             
-        # Deduct exactly 1 point per job
+        # Deduct point & assign driver
         driver.wallet_balance -= DRIVER_COMMISSION_POINTS
         booking.status = "ASSIGNED"
         booking.driver_id = driver.telegram_id
@@ -501,7 +505,6 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session.add(tx)
         await session.commit()
         
-        # Save booking attributes for local scope usage
         customer_id = booking.customer_id
         location = booking.location
         fare = booking.fare_mmk
@@ -511,21 +514,25 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hours = booking.hours
         passengers = booking.passengers
 
-    await query.answer("✅ Job accepted successfully!")
-    
-    # 1. Update public group message safely (hiding sensitive info)
-    await query.edit_message_text(
-        text=f"✅ **JOB #{b_id} TAKEN**\nDriver: @{driver_user.username if driver_user.username else driver_user.first_name}\nRemaining Points: {driver.wallet_balance:,.0f}", 
-        parse_mode="Markdown"
-    )
-    
-    # 2. Send private details securely to the driver's private chat
+    # Check if location contains latitude/longitude coordinates
+    maps_link = ""
+    is_coords = False
+    lat, lng = 0.0, 0.0
+    try:
+        parts = [float(p.strip()) for p in location.split(",")]
+        if len(parts) == 2:
+            lat, lng = parts[0], parts[1]
+            maps_link = f"\n🗺 **Google Maps Link:** https://www.google.com/maps/search/?api=1&query={lat},{lng}\n"
+            is_coords = True
+    except (ValueError, TypeError):
+        pass
+
     driver_private_text = (
         f"🎯 **JOB ASSIGNED: #{b_id}**\n\n"
         f"🚙 Vehicle: {vehicle}\n"
         f"📅 Date & Time: {date_str} at {time_str} ({hours} Hours)\n"
         f"👥 Passengers: {passengers}\n"
-        f"📍 Pickup Location: `{location}`\n"
+        f"📍 Pickup Location: `{location}`{maps_link}\n"
         f"💰 Fare to collect: {fare:,.0f} MMK\n\n"
         f"💬 **Customer Contact:**\n"
         f"You can contact the customer directly using the button below."
@@ -536,6 +543,7 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]
     ]
     
+    # Send private message to driver
     try:
         await context.bot.send_message(
             chat_id=driver_user.id, 
@@ -543,10 +551,31 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown", 
             reply_markup=InlineKeyboardMarkup(driver_kb)
         )
+        # Send interactive map pin if GPS coordinates were provided
+        if is_coords:
+            await context.bot.send_location(
+                chat_id=driver_user.id,
+                latitude=lat,
+                longitude=lng
+            )
     except Exception as e:
         logger.error(f"Failed to send private info to driver: {e}")
+        bot_info = await context.bot.get_me()
+        await query.answer(
+            f"⚠️ Could not send details to direct PM!\n\nPlease open @{bot_info.username} and press /start first.",
+            show_alert=True
+        )
+        return
 
-    # 3. Notify customer privately that a driver has been found
+    await query.answer("✅ Job accepted successfully!")
+    
+    # Update public group message safely
+    await query.edit_message_text(
+        text=f"✅ **JOB #{b_id} TAKEN**\nDriver: @{driver_user.username if driver_user.username else driver_user.first_name}\nRemaining Points: {driver.wallet_balance:,.0f}", 
+        parse_mode="Markdown"
+    )
+
+    # Notify customer privately
     try:
         await context.bot.send_message(
             chat_id=customer_id, 
