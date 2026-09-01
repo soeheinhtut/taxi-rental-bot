@@ -461,7 +461,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.commit()
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **PAYMENT REJECTED**", parse_mode="Markdown")
 
-# --- ACCEPT JOB (DEDUCTS 1 POINT) ---
+# --- ACCEPT JOB (DEDUCTS 1 POINT & SENDS PRIVATE DETAILS TO DRIVER) ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     driver_user = query.from_user
@@ -501,12 +501,60 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session.add(tx)
         await session.commit()
         
+        # Save booking attributes for local scope usage
+        customer_id = booking.customer_id
+        location = booking.location
+        fare = booking.fare_mmk
+        vehicle = booking.vehicle
+        date_str = booking.date_str
+        time_str = booking.time_str
+        hours = booking.hours
+        passengers = booking.passengers
+
     await query.answer("✅ Job accepted successfully!")
-    await query.edit_message_text(text=f"✅ **JOB #{b_id} TAKEN**\nDriver: @{driver_user.username}\nRemaining Points: {driver.wallet_balance:,.0f}", parse_mode="Markdown")
     
-    kb = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]]
-    await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **Driver Found!** Accepted by @{driver_user.username}.", parse_mode="Markdown")
-    await context.bot.send_message(chat_id=driver_user.id, text=f"📋 **Trip Management Dashboard for #{b_id}**", reply_markup=InlineKeyboardMarkup(kb))
+    # 1. Update public group message safely (hiding sensitive info)
+    await query.edit_message_text(
+        text=f"✅ **JOB #{b_id} TAKEN**\nDriver: @{driver_user.username if driver_user.username else driver_user.first_name}\nRemaining Points: {driver.wallet_balance:,.0f}", 
+        parse_mode="Markdown"
+    )
+    
+    # 2. Send private details securely to the driver's private chat
+    driver_private_text = (
+        f"🎯 **JOB ASSIGNED: #{b_id}**\n\n"
+        f"🚙 Vehicle: {vehicle}\n"
+        f"📅 Date & Time: {date_str} at {time_str} ({hours} Hours)\n"
+        f"👥 Passengers: {passengers}\n"
+        f"📍 Pickup Location: `{location}`\n"
+        f"💰 Fare to collect: {fare:,.0f} MMK\n\n"
+        f"💬 **Customer Contact:**\n"
+        f"You can contact the customer directly using the button below."
+    )
+    
+    driver_kb = [
+        [InlineKeyboardButton("💬 Chat with Customer", url=f"tg://user?id={customer_id}")],
+        [InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]
+    ]
+    
+    try:
+        await context.bot.send_message(
+            chat_id=driver_user.id, 
+            text=driver_private_text, 
+            parse_mode="Markdown", 
+            reply_markup=InlineKeyboardMarkup(driver_kb)
+        )
+    except Exception as e:
+        logger.error(f"Failed to send private info to driver: {e}")
+
+    # 3. Notify customer privately that a driver has been found
+    try:
+        await context.bot.send_message(
+            chat_id=customer_id, 
+            text=f"🚖 **Driver Found!**\nYour driver (@{driver_user.username if driver_user.username else driver_user.first_name}) has accepted your booking and will contact you or head to your location.", 
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify customer: {e}")
 
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
