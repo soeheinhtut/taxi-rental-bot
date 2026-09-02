@@ -2,7 +2,10 @@ import os
 import logging
 from datetime import datetime
 from fastapi import FastAPI, Request
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, 
+    KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+)
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
     MessageHandler, filters, ContextTypes, ConversationHandler
@@ -38,11 +41,9 @@ TOPUP_PACKAGES = {
 }
 
 # Conversation States
-(
-    VEHICLE, DATE, TIME, HOURS, LOCATION, PASSENGERS, PHONE,
-    D_NAME, D_PHONE, D_VEHICLE, D_PLATE,
-    TOPUP_PKG, TOPUP_RECEIPT
-) = range(13)
+VEHICLE, DATE, TIME, HOURS, LOCATION, PASSENGERS, C_PHONE = range(7)
+D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(7, 11)
+TOPUP_PKG, TOPUP_RECEIPT = range(11, 13)
 
 app = FastAPI()
 telegram_app = None
@@ -144,7 +145,7 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     await update.message.reply_text(
         f"⏱ Select Rental Package for **{vehicle}**:\n"
         f"*(Rate: {rate:,.0f} MMK / hour)*\n\n"
-        f"💡 *(Note: Price and Trip plan details can negotiate directly with the Driver)*",
+        f"💡 *(Price and Trip plan details can negotiate directly with the Driver)*",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -184,25 +185,42 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location
-    context.user_data['location'] = f"{loc.latitude},{loc.longitude}" if loc else update.message.text
+    if loc:
+        # Create clickable Google Maps link
+        context.user_data['location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}"
+    else:
+        context.user_data['location'] = update.message.text
+        
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
 
 async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['passengers'] = update.message.text
-    await update.message.reply_text("📱 Please enter your **Contact Phone Number** (e.g., 0912345678):")
-    return PHONE
+    
+    phone_keyboard = ReplyKeyboardMarkup(
+        [[KeyboardButton("📞 Share Contact Phone", request_contact=True)]],
+        one_time_keyboard=True,
+        resize_keyboard=True
+    )
+    await update.message.reply_text(
+        "📞 Please enter or share your **Phone Contact Number** so the driver can reach you:",
+        reply_markup=phone_keyboard
+    )
+    return C_PHONE
 
-async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['customer_phone'] = update.message.text
+async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    contact = update.message.contact
+    if contact:
+        phone = contact.phone_number
+    else:
+        phone = update.message.text
+        
+    context.user_data['customer_phone'] = phone
     data = context.user_data
     booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}"
     
     hours_label = "1 Day (10 Hours)" if data['hours'] == 10 else f"{data['hours']} Hours"
     points_required = float(data['hours'])
-    
-    # Clickable Google Maps Link
-    maps_link = f"https://www.google.com/maps?q={data['location'].replace(' ', '')}"
     
     summary = (
         f"✅ **BOOKING CONFIRMED**\n\n"
@@ -211,20 +229,19 @@ async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"📅 Date: {data['date']}\n"
         f"🕐 Time: {data['time']}\n"
         f"⏱ Package: {hours_label}\n"
-        f"📍 Location: [Open Map Location]({maps_link})\n"
+        f"📍 Location: [Pickup Location]({data['location']})\n"
         f"👥 Passengers: {data['passengers']}\n"
-        f"📱 Phone: `{data['customer_phone']}`\n\n"
+        f"📞 Contact: `{phone}`\n\n"
         f"💰 **Total Fare: {data['fare']:,.0f} MMK (Pay directly to driver)**\n\n"
         f"Searching for an available driver. You will be notified once a driver accepts your trip!"
     )
     
-    await update.message.reply_text(summary, parse_mode="Markdown", disable_web_page_preview=True)
+    await update.message.reply_text(summary, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove(), disable_web_page_preview=True)
     
     async with AsyncSessionLocal() as session:
         booking = Booking(
             id=booking_id,
             customer_id=update.message.from_user.id,
-            customer_phone=data['customer_phone'],
             vehicle=data['vehicle'],
             date_str=data['date'],
             time_str=data['time'],
@@ -236,6 +253,8 @@ async def phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             payment_method="DIRECT",
             payment_receipt_file_id=None
         )
+        if hasattr(booking, 'customer_phone'):
+            booking.customer_phone = phone
         session.add(booking)
         await session.commit()
         
@@ -267,12 +286,20 @@ async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['driver_name'] = update.message.text
-    await update.message.reply_text("📱 Please enter your **Phone Number** (e.g., 0998765432):")
+    
+    phone_keyboard = ReplyKeyboardMarkup(
+        [[KeyboardButton("📞 Share Phone Number", request_contact=True)]],
+        one_time_keyboard=True,
+        resize_keyboard=True
+    )
+    await update.message.reply_text("📞 Please enter or share your **Phone Contact Number**:", reply_markup=phone_keyboard)
     return D_PHONE
 
 async def driver_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['driver_phone'] = update.message.text
-    await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model** (e.g., Toyota Crown / Sedan):")
+    contact = update.message.contact
+    context.user_data['driver_phone'] = contact.phone_number if contact else update.message.text
+    
+    await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model** (e.g., Toyota Crown / Sedan):", reply_markup=ReplyKeyboardRemove())
     return D_VEHICLE
 
 async def driver_vehicle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -292,19 +319,17 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
             driver = Driver(
                 telegram_id=user.id, 
                 name=data['driver_name'], 
-                phone=data['driver_phone'],
-                vehicle=data['driver_vehicle'],
-                plate=plate_number,
                 username=user.username, 
                 wallet_balance=0.0, 
                 is_approved=False
             )
+            if hasattr(driver, 'phone'):
+                driver.phone = data['driver_phone']
             session.add(driver)
         else:
             driver.name = data['driver_name']
-            driver.phone = data['driver_phone']
-            driver.vehicle = data['driver_vehicle']
-            driver.plate = plate_number
+            if hasattr(driver, 'phone'):
+                driver.phone = data['driver_phone']
         await session.commit()
         
     await update.message.reply_text("✅ Registration details submitted! Please wait for admin approval.")
@@ -314,7 +339,7 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
             text = (
                 f"👨‍✈️ **NEW DRIVER REGISTRATION**\n\n"
                 f"👤 Name: {data['driver_name']}\n"
-                f"📱 Phone: `{data['driver_phone']}`\n"
+                f"📞 Phone: `{data['driver_phone']}`\n"
                 f"🚙 Vehicle: {data['driver_vehicle']}\n"
                 f"🔢 Plate Number: `{plate_number}`\n"
                 f"🆔 Telegram ID: `{user.id}`"
@@ -461,7 +486,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **TOP-UP REJECTED**", parse_mode="Markdown")
         await context.bot.send_message(chat_id=d_id, text="❌ Your wallet top-up request was rejected by the admin.")
 
-# --- ACCEPT JOB (CLEAR GROUP INFO & DM TRIP DETAILS) ---
+# --- ACCEPT JOB (DYNAMIC POINT DEDUCTION & INFO SHARING) ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     driver_user = query.from_user
@@ -501,73 +526,52 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         session.add(tx)
         await session.commit()
+
+        customer_phone = getattr(booking, 'customer_phone', 'N/A')
+        driver_phone = getattr(driver, 'phone', 'N/A')
+        booking_hours = booking.hours
+        hours_label = "1 Day (10 Hours)" if booking_hours == 10 else f"{booking_hours} Hours"
         
-        c_id = booking.customer_id
-        c_phone = getattr(booking, 'customer_phone', 'Not provided')
-        b_vehicle = booking.vehicle
-        b_date = booking.date_str
-        b_time = booking.time_str
-        b_hours = booking.hours
-        b_loc = booking.location
-        b_pax = booking.passengers
-        b_fare = booking.fare_mmk
-
-    await query.answer("✅ Job accepted successfully!")
-
-    # 1. DISAPPEAR/REMOVE DISPATCH DETAILS FROM DRIVER GROUP
-    driver_tag = f"@{driver_user.username}" if driver_user.username else driver.name
-    await query.edit_message_text(
-        text=f"✅ **JOB #{b_id} TAKEN** by {driver_tag}\n*Details hidden from group for privacy.*", 
-        parse_mode="Markdown"
-    )
-
-    # 2. CLICKABLE GOOGLE MAPS LINK
-    maps_link = f"https://www.google.com/maps?q={b_loc.replace(' ', '')}"
-    hours_label = "1 Day (10 Hours)" if b_hours == 10 else f"{b_hours} Hours"
-
-    # 3. SEND FULL TRIP DETAILS TO DRIVER IN PRIVATE CHAT (DM)
-    driver_dm_text = (
-        f"📋 **TRIP DETAILS FOR JOB #{b_id}**\n\n"
-        f"🚙 Vehicle: **{b_vehicle}**\n"
-        f"📅 Date: {b_date} | 🕐 Time: {b_time}\n"
-        f"⏱ Package: {hours_label} | 👥 Passengers: {b_pax}\n"
-        f"💰 Total Fare to Collect: **{b_fare:,.0f} MMK**\n\n"
-        f"📱 **Customer Contact:** `{c_phone}`\n"
-        f"📍 **Pickup Location:** [Click here to open Map]({maps_link})\n\n"
-        f"💡 *(Negotiate price/trip plan details directly with customer if needed)*"
-    )
-    
-    kb = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]]
-    
-    try:
-        await context.bot.send_message(
-            chat_id=driver_user.id,
-            text=driver_dm_text,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(kb),
-            disable_web_page_preview=False
-        )
-    except Exception as e:
-        logger.error(f"Failed to send DM to driver: {e}")
-
-    # 4. SEND DRIVER CONTACT DETAILS TO CUSTOMER IN PRIVATE CHAT (DM)
-    customer_dm_text = (
-        f"🚖 **Driver Found!**\n\n"
-        f"👤 Driver Name: **{driver.name}**\n"
-        f"📱 Driver Contact: `{driver.phone}`\n"
-        f"🚙 Vehicle: {driver.vehicle}\n"
-        f"🔢 License Plate: `{driver.plate}`\n\n"
-        f"Your driver will contact you shortly!"
-    )
-    
-    try:
-        await context.bot.send_message(
-            chat_id=c_id,
-            text=customer_dm_text,
+        # 1. Clear details from Dispatch Group
+        await query.edit_message_text(
+            text=f"🔒 **JOB #{b_id} ACCEPTED**\n\n"
+                 f"Driver: {driver.name} (@{driver_user.username if driver_user.username else 'NoUsername'})\n"
+                 f"Status: Job is locked and no longer available.",
             parse_mode="Markdown"
         )
-    except Exception as e:
-        logger.error(f"Failed to send DM to customer: {e}")
+        await query.answer("✅ Job accepted successfully!")
+
+        # 2. Send complete Trip details & Customer contact privately to the Driver
+        driver_trip_msg = (
+            f"📋 **ACCEPTED TRIP DETAILS (#{b_id})**\n\n"
+            f"📅 Date: {booking.date_str} | 🕐 Time: {booking.time_str}\n"
+            f"⏱ Package: {hours_label}\n"
+            f"🚙 Vehicle Type: {booking.vehicle}\n"
+            f"👥 Passengers: {booking.passengers}\n"
+            f"📍 Location: [Open Pickup Location]({booking.location})\n"
+            f"📞 **Customer Phone:** `{customer_phone}`\n"
+            f"💰 Fare to Collect: **{booking.fare_mmk:,.0f} MMK**\n\n"
+            f"Please call the customer to confirm the trip details."
+        )
+        kb_driver = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]]
+        await context.bot.send_message(
+            chat_id=driver_user.id, 
+            text=driver_trip_msg, 
+            parse_mode="Markdown", 
+            reply_markup=InlineKeyboardMarkup(kb_driver),
+            disable_web_page_preview=True
+        )
+
+        # 3. Send Driver info & Driver contact privately to the Customer
+        customer_msg = (
+            f"🚖 **DRIVER ASSIGNED!**\n\n"
+            f"Your driver is on the way for Booking `{b_id}`.\n\n"
+            f"👨‍✈️ **Driver Name:** {driver.name}\n"
+            f"📞 **Driver Phone:** `{driver_phone}`\n"
+            f"🏷 **Telegram:** @{driver_user.username if driver_user.username else 'N/A'}\n\n"
+            f"You can contact your driver directly."
+        )
+        await context.bot.send_message(chat_id=booking.customer_id, text=customer_msg, parse_mode="Markdown")
 
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -622,7 +626,7 @@ async def startup_event():
             HOURS: [CallbackQueryHandler(hours_chosen)],
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)],
             PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)],
-            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, phone_received)]
+            C_PHONE: [MessageHandler((filters.TEXT | filters.CONTACT) & ~filters.COMMAND, customer_phone_received)]
         },
         fallbacks=[CommandHandler("start", start)]
     )
@@ -632,7 +636,7 @@ async def startup_event():
         entry_points=[CallbackQueryHandler(driver_register_start, pattern="^driver_register$")],
         states={
             D_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_name_received)],
-            D_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_phone_received)],
+            D_PHONE: [MessageHandler((filters.TEXT | filters.CONTACT) & ~filters.COMMAND, driver_phone_received)],
             D_VEHICLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_vehicle_received)],
             D_PLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_plate_received)]
         },
