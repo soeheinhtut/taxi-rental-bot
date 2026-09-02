@@ -20,10 +20,14 @@ RUN_MODE = os.getenv("RUN_MODE", "polling")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
 
-# 1 Point per job commission & Minimum required balance
-DRIVER_COMMISSION_POINTS = 1.0
-MIN_WALLET_POINTS = 1.0
 MMK_PER_POINT = 1000  # 1 Point = 1,000 MMK
+
+# Hourly rates per vehicle type
+HOURLY_RATES = {
+    "Sedan": 15000,
+    "SUV": 20000,
+    "Alphard / VIP": 25000
+}
 
 # Top-Up Packages
 TOPUP_PACKAGES = {
@@ -37,12 +41,6 @@ TOPUP_PACKAGES = {
 VEHICLE, DATE, TIME, HOURS, LOCATION, PASSENGERS = range(6)
 D_NAME, D_VEHICLE, D_PLATE = range(6, 9)
 TOPUP_PKG, TOPUP_RECEIPT = range(9, 11)
-
-PACKAGES = {
-    "Sedan": {"fare": 45000},
-    "SUV": {"fare": 60000},
-    "Alphard / VIP": {"fare": 100000}
-}
 
 app = FastAPI()
 telegram_app = None
@@ -81,7 +79,7 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
             f"👤 **Driver Wallet Status**\n\n"
             f"Name: {driver.name}\n"
             f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
-            f"*(1 Job = {DRIVER_COMMISSION_POINTS} Point deduction)*",
+            f"*(1 Hour = 1 Point deduction | 1 Day = 10 Points deduction)*",
             parse_mode="Markdown"
         )
 
@@ -98,7 +96,7 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
             f"👤 **Driver Wallet Status**\n\n"
             f"Name: {driver.name}\n"
             f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
-            f"*(1 Job = {DRIVER_COMMISSION_POINTS} Point deduction)*",
+            f"*(1 Hour = 1 Point deduction | 1 Day = 10 Points deduction)*",
             parse_mode="Markdown"
         )
 
@@ -108,9 +106,9 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     keyboard = [
-        [InlineKeyboardButton("Sedan (45,000 MMK)", callback_data="Sedan")],
-        [InlineKeyboardButton("SUV (60,000 MMK)", callback_data="SUV")],
-        [InlineKeyboardButton("Alphard / VIP (100,000 MMK)", callback_data="Alphard / VIP")]
+        [InlineKeyboardButton("Sedan (15,000 MMK / hr)", callback_data="Sedan")],
+        [InlineKeyboardButton("SUV (20,000 MMK / hr)", callback_data="SUV")],
+        [InlineKeyboardButton("Alphard / VIP (25,000 MMK / hr)", callback_data="Alphard / VIP")]
     ]
     await query.edit_message_text("🚘 Select Vehicle Type:", reply_markup=InlineKeyboardMarkup(keyboard))
     return VEHICLE
@@ -119,36 +117,64 @@ async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     context.user_data['vehicle'] = query.data
-    context.user_data['fare'] = PACKAGES[query.data]['fare']
     
-    await query.edit_message_text("📅 Enter Rental Date (e.g., 26 Aug 2026):")
+    await query.edit_message_text(f"🚘 Vehicle: **{query.data}**\n\n📅 Enter Rental Date (e.g., 26 Aug 2026):", parse_mode="Markdown")
     return DATE
 
 async def date_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['date'] = update.message.text
-    await update.message.reply_text("🕐 Enter Pickup Time (e.g., 10:00):")
+    await update.message.reply_text("🕐 Enter Pickup Time (e.g., 10:00 AM):")
     return TIME
 
 async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['time'] = update.message.text
-    await update.message.reply_text("⏱ Select Total Hours Needed:", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("3 Hours", callback_data="3"), InlineKeyboardButton("4 Hours", callback_data="4")],
-        [InlineKeyboardButton("6 Hours", callback_data="6"), InlineKeyboardButton("10 Hours", callback_data="10")]
-    ]))
+    vehicle = context.user_data.get('vehicle', 'Sedan')
+    rate = HOURLY_RATES.get(vehicle, 15000)
+    
+    # 5 packages: 1hr, 2hrs, 3hrs, 6hrs, 1Day (10hrs)
+    keyboard = [
+        [InlineKeyboardButton(f"1 Hour ({1 * rate:,.0f} MMK)", callback_data="1")],
+        [InlineKeyboardButton(f"2 Hours ({2 * rate:,.0f} MMK)", callback_data="2")],
+        [InlineKeyboardButton(f"3 Hours ({3 * rate:,.0f} MMK)", callback_data="3")],
+        [InlineKeyboardButton(f"6 Hours ({6 * rate:,.0f} MMK)", callback_data="6")],
+        [InlineKeyboardButton(f"1 Day / 10 Hours ({10 * rate:,.0f} MMK)", callback_data="10")]
+    ]
+    
+    await update.message.reply_text(
+        f"⏱ Select Rental Package for **{vehicle}**:\n*(Rate: {rate:,.0f} MMK / hour)*",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
     return HOURS
 
 async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data['hours'] = int(query.data)
+    
+    hours = int(query.data)
+    vehicle = context.user_data['vehicle']
+    rate = HOURLY_RATES[vehicle]
+    total_fare = hours * rate
+    
+    context.user_data['hours'] = hours
+    context.user_data['fare'] = total_fare
+    
+    hours_label = "1 Day (10 Hours)" if hours == 10 else f"{hours} Hours"
     
     location_keyboard = ReplyKeyboardMarkup(
         [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
         one_time_keyboard=True,
         resize_keyboard=True
     )
+    
+    await query.edit_message_text(
+        f"⏱ **Package Selected:** {hours_label}\n"
+        f"💰 **Total Fare:** {total_fare:,.0f} MMK\n\n"
+        f"📍 Please click below to share your exact GPS pickup location or type your address:",
+        parse_mode="Markdown"
+    )
     await query.message.reply_text(
-        "📍 Please click below to share your exact GPS pickup location:",
+        "Click button to send GPS location:",
         reply_markup=location_keyboard
     )
     return LOCATION
@@ -164,16 +190,19 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
     data = context.user_data
     booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}"
     
+    hours_label = "1 Day (10 Hours)" if data['hours'] == 10 else f"{data['hours']} Hours"
+    points_required = float(data['hours']) # 1 Hour = 1 Point, 1 Day = 10 Points
+    
     summary = (
         f"✅ **BOOKING CONFIRMED**\n\n"
         f"🆔 Booking ID: `{booking_id}`\n"
         f"🚙 Vehicle: {data['vehicle']}\n"
         f"📅 Date: {data['date']}\n"
         f"🕐 Time: {data['time']}\n"
-        f"⏱ Hours: {data['hours']} Hours\n"
+        f"⏱ Package: {hours_label}\n"
         f"📍 Location: {data['location']}\n"
         f"👥 Passengers: {data['passengers']}\n\n"
-        f"💰 **Total Fare: {data['fare']:,} MMK (Pay directly to driver)**\n\n"
+        f"💰 **Total Fare: {data['fare']:,.0f} MMK (Pay directly to driver)**\n\n"
         f"Searching for an available driver. You will be notified once a driver accepts your trip!"
     )
     
@@ -200,14 +229,14 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
     if DRIVER_GROUP_ID:
         try:
             driver_text = (
-                f"🚗 **NEW HOURLY RENTAL**\n\n"
+                f"🚗 **NEW RENTAL JOB**\n\n"
                 f"🆔 `{booking.id}`\n"
                 f"📅 {booking.date_str} | 🕐 {booking.time_str}\n"
-                f"⏱ {booking.hours} Hours | 👥 {booking.passengers} Pax\n"
+                f"⏱ Package: {hours_label} | 👥 {booking.passengers} Pax\n"
                 f"📍 Location: {booking.location}\n"
                 f"🚙 Vehicle: {booking.vehicle}\n"
-                f"💰 Fare: **{booking.fare_mmk:,.0f} MMK** (Collect directly from customer)\n"
-                f"➕ Commission Deduction: **{DRIVER_COMMISSION_POINTS} Point**"
+                f"💰 Fare: **{booking.fare_mmk:,.0f} MMK** (Collect from customer)\n"
+                f"➕ Commission Deduction: **{points_required:,.0f} Points**"
             )
             kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]]
             await context.bot.send_message(chat_id=DRIVER_GROUP_ID, text=driver_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
@@ -402,7 +431,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **TOP-UP REJECTED**", parse_mode="Markdown")
         await context.bot.send_message(chat_id=d_id, text="❌ Your wallet top-up request was rejected by the admin.")
 
-# --- ACCEPT JOB (DEDUCTS 1 POINT) ---
+# --- ACCEPT JOB (DYNAMIC POINT DEDUCTION) ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     driver_user = query.from_user
@@ -415,10 +444,6 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not driver or not driver.is_approved:
             await query.answer("❌ You are not an approved driver yet!", show_alert=True)
             return
-            
-        if driver.wallet_balance < MIN_WALLET_POINTS:
-            await query.answer(f"❌ Insufficient points ({driver.wallet_balance:,.0f}). Minimum required: {MIN_WALLET_POINTS} Point. Top up needed!", show_alert=True)
-            return
 
         b_res = await session.execute(select(Booking).where(Booking.id == b_id).with_for_update())
         booking = b_res.scalar_one_or_none()
@@ -427,15 +452,21 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Sorry, this job is no longer available!", show_alert=True)
             return
             
-        # Deduct exactly 1 point per job
-        driver.wallet_balance -= DRIVER_COMMISSION_POINTS
+        # Point deduction: 1 Hour = 1 Point, 1 Day (10 hours) = 10 Points
+        required_points = float(booking.hours)
+        
+        if driver.wallet_balance < required_points:
+            await query.answer(f"❌ Insufficient points ({driver.wallet_balance:,.0f}). Required: {required_points:,.0f} Points. Top up needed!", show_alert=True)
+            return
+
+        driver.wallet_balance -= required_points
         booking.status = "ASSIGNED"
         booking.driver_id = driver.telegram_id
         booking.driver_name = driver.name
         
         tx = WalletTransaction(
             driver_telegram_id=driver.telegram_id,
-            amount=-DRIVER_COMMISSION_POINTS,
+            amount=-required_points,
             type="COMMISSION",
             booking_id=booking.id
         )
