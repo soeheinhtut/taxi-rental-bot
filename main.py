@@ -448,44 +448,14 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED")
         
-        invite_link_str = None
-        if DRIVER_GROUP_ID != 0:
-            try:
-                # 1. Use timezone-aware UTC time
-                expire_time = datetime.now(timezone.utc) + timedelta(hours=24)
-                
-                # 2. Removed member_limit=1 to prevent instant consumption
-                link_obj = await context.bot.create_chat_invite_link(
-                    chat_id=DRIVER_GROUP_ID, 
-                    expire_date=expire_time
-                )
-                invite_link_str = link_obj.invite_link
-            except Exception as e:
-                # 3. Log error without calling export_chat_invite_link (which revokes primary links)
-                logger.error(f"create_chat_invite_link failed: {e}")
-
-        if invite_link_str:
-            join_msg = (
-                f"🎉 **Your driver account has been approved!**\n\n"
-                f"👉 Click the link below to join the Driver Dispatch Group:\n"
-                f"{invite_link_str}\n\n"
-                f"⏰ *Note: Link expires in 24 hours.*"
-            )
-        else:
-            join_msg = (
-                f"🎉 **Your driver account has been approved!**\n\n"
-                f"Please contact the administrator to get added to the Driver Dispatch Group."
-            )
-
         try:
-            await context.bot.send_message(
-                chat_id=d_id, 
-                text=join_msg, 
-                parse_mode="Markdown",
-                disable_web_page_preview=True
-            )
+            invite_link = await context.bot.create_chat_invite_link(chat_id=DRIVER_GROUP_ID, member_limit=1)
+            join_msg = f"🎉 Your driver account is approved!\n\nPlease join the Driver Group here: {invite_link.invite_link}"
         except Exception as e:
-            logger.error(f"Failed to send approval message to driver {d_id}: {e}")
+            logger.error(f"Failed to create invite link: {e}")
+            join_msg = "🎉 Your driver account is approved!"
+            
+        await context.bot.send_message(chat_id=d_id, text=join_msg)
 
     elif data.startswith("tapp_"):
         parts = data.split("_")
@@ -513,7 +483,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         d_id = int(data.split("_")[1])
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **TOP-UP REJECTED**", parse_mode="Markdown")
         await context.bot.send_message(chat_id=d_id, text="❌ Your wallet top-up request was rejected by the admin.")
-
+        
 # --- ACCEPT JOB ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
