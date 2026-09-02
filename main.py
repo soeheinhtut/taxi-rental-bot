@@ -186,7 +186,6 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location
     if loc:
-        # Create clickable Google Maps link
         context.user_data['location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}"
     else:
         context.user_data['location'] = update.message.text
@@ -210,10 +209,7 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     contact = update.message.contact
-    if contact:
-        phone = contact.phone_number
-    else:
-        phone = update.message.text
+    phone = contact.phone_number if contact else update.message.text
         
     context.user_data['customer_phone'] = phone
     data = context.user_data
@@ -275,7 +271,6 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
             logger.error(f"Failed to send to DRIVER_GROUP_ID: {e}")
             
     return ConversationHandler.END
-
 
 # --- DRIVER REGISTRATION FLOW ---
 async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -452,12 +447,41 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.commit()
         
         await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED")
+        
+        # Robust invite link generation with fallback
+        invite_link_str = None
+        if DRIVER_GROUP_ID != 0:
+            try:
+                # Primary method: 1-time unique invite link
+                link_obj = await context.bot.create_chat_invite_link(
+                    chat_id=DRIVER_GROUP_ID, 
+                    member_limit=1
+                )
+                invite_link_str = link_obj.invite_link
+            except Exception as e:
+                logger.error(f"create_chat_invite_link failed: {e}")
+                try:
+                    # Fallback method: export existing primary invite link
+                    invite_link_str = await context.bot.export_chat_invite_link(chat_id=DRIVER_GROUP_ID)
+                except Exception as e2:
+                    logger.error(f"export_chat_invite_link failed: {e2}")
+
+        if invite_link_str:
+            join_msg = (
+                f"🎉 **Your driver account has been approved!**\n\n"
+                f"👉 Click the link below to join the Driver Dispatch Group:\n"
+                f"{invite_link_str}"
+            )
+        else:
+            join_msg = (
+                f"🎉 **Your driver account has been approved!**\n\n"
+                f"Please contact the administrator to get added to the Driver Dispatch Group."
+            )
+
         try:
-            invite_link = await context.bot.create_chat_invite_link(chat_id=DRIVER_GROUP_ID, member_limit=1)
-            join_msg = f"🎉 Your driver account is approved!\n\nPlease join the Driver Group here: {invite_link.invite_link}"
-        except Exception:
-            join_msg = "🎉 Your driver account is approved!"
-        await context.bot.send_message(chat_id=d_id, text=join_msg)
+            await context.bot.send_message(chat_id=d_id, text=join_msg, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Failed to send approval message to driver {d_id}: {e}")
 
     elif data.startswith("tapp_"):
         parts = data.split("_")
@@ -486,7 +510,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **TOP-UP REJECTED**", parse_mode="Markdown")
         await context.bot.send_message(chat_id=d_id, text="❌ Your wallet top-up request was rejected by the admin.")
 
-# --- ACCEPT JOB (DYNAMIC POINT DEDUCTION & INFO SHARING) ---
+# --- ACCEPT JOB ---
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     driver_user = query.from_user
