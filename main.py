@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Request
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, 
@@ -451,26 +451,25 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         invite_link_str = None
         if DRIVER_GROUP_ID != 0:
             try:
-                # Expire after 24 hours, single-use link
-                expire_time = datetime.now() + timedelta(days=1)
+                # 1. Use timezone-aware UTC time
+                expire_time = datetime.now(timezone.utc) + timedelta(hours=24)
+                
+                # 2. Removed member_limit=1 to prevent instant consumption
                 link_obj = await context.bot.create_chat_invite_link(
                     chat_id=DRIVER_GROUP_ID, 
-                    member_limit=1,
                     expire_date=expire_time
                 )
                 invite_link_str = link_obj.invite_link
             except Exception as e:
+                # 3. Log error without calling export_chat_invite_link (which revokes primary links)
                 logger.error(f"create_chat_invite_link failed: {e}")
-                try:
-                    invite_link_str = await context.bot.export_chat_invite_link(chat_id=DRIVER_GROUP_ID)
-                except Exception as e2:
-                    logger.error(f"export_chat_invite_link failed: {e2}")
 
         if invite_link_str:
             join_msg = (
                 f"🎉 **Your driver account has been approved!**\n\n"
                 f"👉 Click the link below to join the Driver Dispatch Group:\n"
-                f"{invite_link_str}"
+                f"{invite_link_str}\n\n"
+                f"⏰ *Note: Link expires in 24 hours.*"
             )
         else:
             join_msg = (
@@ -479,7 +478,6 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         try:
-            # disable_web_page_preview=True prevents Telegram from auto-fetching and expiring the 1-time link
             await context.bot.send_message(
                 chat_id=d_id, 
                 text=join_msg, 
