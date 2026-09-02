@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, 
@@ -448,20 +448,20 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED")
         
-        # Robust invite link generation with fallback
         invite_link_str = None
         if DRIVER_GROUP_ID != 0:
             try:
-                # Primary method: 1-time unique invite link
+                # Expire after 24 hours, single-use link
+                expire_time = datetime.now() + timedelta(days=1)
                 link_obj = await context.bot.create_chat_invite_link(
                     chat_id=DRIVER_GROUP_ID, 
-                    member_limit=1
+                    member_limit=1,
+                    expire_date=expire_time
                 )
                 invite_link_str = link_obj.invite_link
             except Exception as e:
                 logger.error(f"create_chat_invite_link failed: {e}")
                 try:
-                    # Fallback method: export existing primary invite link
                     invite_link_str = await context.bot.export_chat_invite_link(chat_id=DRIVER_GROUP_ID)
                 except Exception as e2:
                     logger.error(f"export_chat_invite_link failed: {e2}")
@@ -479,7 +479,13 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         try:
-            await context.bot.send_message(chat_id=d_id, text=join_msg, parse_mode="Markdown")
+            # disable_web_page_preview=True prevents Telegram from auto-fetching and expiring the 1-time link
+            await context.bot.send_message(
+                chat_id=d_id, 
+                text=join_msg, 
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
         except Exception as e:
             logger.error(f"Failed to send approval message to driver {d_id}: {e}")
 
