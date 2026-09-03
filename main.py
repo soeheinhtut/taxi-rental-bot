@@ -23,16 +23,14 @@ RUN_MODE = os.getenv("RUN_MODE", "polling")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
 
-MMK_PER_POINT = 1000  # 1 Point = 1,000 MMK
+MMK_PER_POINT = 1000
 
-# Hourly rates per vehicle type
 HOURLY_RATES = {
     "Sedan": 15000,
     "SUV": 20000,
     "Alphard / VIP": 25000
 }
 
-# Top-Up Packages
 TOPUP_PACKAGES = {
     "pkg_10": {"points": 10, "price": 10 * MMK_PER_POINT},
     "pkg_50": {"points": 50, "price": 50 * MMK_PER_POINT},
@@ -40,7 +38,6 @@ TOPUP_PACKAGES = {
     "pkg_1000": {"points": 1000, "price": 1000 * MMK_PER_POINT},
 }
 
-# Conversation States
 VEHICLE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, PASSENGERS, C_PHONE = range(8)
 D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(8, 12)
 TOPUP_PKG, TOPUP_RECEIPT = range(12, 14)
@@ -48,7 +45,6 @@ TOPUP_PKG, TOPUP_RECEIPT = range(12, 14)
 app = FastAPI()
 telegram_app = None
 
-# --- START & MAIN MENU ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
         return ConversationHandler.END
@@ -65,7 +61,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return ConversationHandler.END
 
-# --- CHECK BALANCE FUNCTION ---
 async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -81,8 +76,7 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(
             f"👤 **Driver Wallet Status**\n\n"
             f"Name: {driver.name}\n"
-            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
-            f"*(1 Hour / TAXI Trip = 1 Point deduction | 1 Day = 10 Points deduction)*",
+            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**",
             parse_mode="Markdown"
         )
 
@@ -98,12 +92,10 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(
             f"👤 **Driver Wallet Status**\n\n"
             f"Name: {driver.name}\n"
-            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
-            f"*(1 Hour / TAXI Trip = 1 Point deduction | 1 Day = 10 Points deduction)*",
+            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**",
             parse_mode="Markdown"
         )
 
-# --- CUSTOMER BOOKING FLOW ---
 async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -121,7 +113,6 @@ async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     context.user_data['vehicle'] = query.data
-    
     await query.edit_message_text(f"🚘 Vehicle: **{query.data}**\n\n📅 Enter Date (e.g., 26 Aug 2026):", parse_mode="Markdown")
     return DATE
 
@@ -134,7 +125,6 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     context.user_data['time'] = update.message.text
     vehicle = context.user_data.get('vehicle', 'Sedan')
     
-    # TAXI FLOW: Skip hours, go straight to Location
     if vehicle == "TAXI":
         location_keyboard = ReplyKeyboardMarkup(
             [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
@@ -143,7 +133,6 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text("📍 Please click below to share your exact GPS Pickup Location or type your address:", reply_markup=location_keyboard)
         return LOCATION
 
-    # HOURLY FLOW
     rate = HOURLY_RATES.get(vehicle, 15000)
     keyboard = [
         [InlineKeyboardButton(f"1 Hour ({1 * rate:,.0f} MMK)", callback_data="1")],
@@ -153,7 +142,7 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         [InlineKeyboardButton(f"1 Day / 10 Hours ({10 * rate:,.0f} MMK)", callback_data="10")]
     ]
     await update.message.reply_text(
-        f"⏱ Select Rental Package for **{vehicle}**:\n*(Rate: {rate:,.0f} MMK / hour)*\n\n💡 *(Price and Trip details can negotiate directly with the Driver)*",
+        f"⏱ Select Rental Package for **{vehicle}**:\n*(Rate: {rate:,.0f} MMK / hour)*",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -171,15 +160,13 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data['hours'] = hours
     context.user_data['fare'] = total_fare
     
-    hours_label = "1 Day (10 Hours)" if hours == 10 else f"{hours} Hours"
-    
     location_keyboard = ReplyKeyboardMarkup(
         [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
         one_time_keyboard=True, resize_keyboard=True
     )
     
     await query.edit_message_text(
-        f"⏱ **Package Selected:** {hours_label}\n💰 **Total Fare:** {total_fare:,.0f} MMK\n\n"
+        f"⏱ **Package Selected:** {hours} Hours\n💰 **Total Fare:** {total_fare:,.0f} MMK\n\n"
         f"📍 Please share your exact GPS pickup location or type your address:",
         parse_mode="Markdown"
     )
@@ -193,12 +180,10 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     else: 
         context.user_data['location'] = update.message.text 
          
-    # If TAXI, ask for Drop-off location next
     if context.user_data.get('vehicle') == "TAXI":
         await update.message.reply_text("📍 Please enter your **Drop-off Location** (type address or landmark):", reply_markup=ReplyKeyboardRemove())
         return DROP_LOCATION
 
-    # If Hourly, go straight to Passengers
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
     return PASSENGERS 
 
@@ -215,17 +200,14 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
         one_time_keyboard=True, resize_keyboard=True 
     ) 
     await update.message.reply_text( 
-        "📞 Please enter or share your **Phone Contact Number** so the driver can reach you:", 
+        "📞 Please enter or share your **Phone Contact Number**:", 
         reply_markup=phone_keyboard 
     ) 
     return C_PHONE 
  
 async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
-    if contact: 
-        phone = contact.phone_number 
-    else: 
-        phone = update.message.text 
+    phone = contact.phone_number if contact else update.message.text 
          
     context.user_data['customer_phone'] = phone 
     data = context.user_data 
@@ -241,7 +223,7 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         hours_db_value = 0
     else:
         final_location = data['location']
-        hours_label = "1 Day (10 Hours)" if data['hours'] == 10 else f"{data['hours']} Hours"
+        hours_label = f"{data['hours']} Hours"
         points_required = float(data['hours'])
         fare_display = f"{data['fare']:,.0f} MMK"
         fare_db_value = float(data['fare'])
@@ -257,8 +239,7 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         f"📍 Location:\n{final_location}\n" 
         f"👥 Passengers: {data['passengers']}\n" 
         f"📞 Contact: `{phone}`\n\n" 
-        f"💰 **Total Fare: {fare_display}**\n\n" 
-        f"Searching for an available driver. You will be notified once a driver accepts your trip!" 
+        f"💰 **Total Fare: {fare_display}**" 
     ) 
      
     await update.message.reply_text(summary, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove(), disable_web_page_preview=True) 
@@ -301,8 +282,6 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
              
     return ConversationHandler.END 
  
- 
-# --- DRIVER REGISTRATION FLOW --- 
 async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
@@ -311,7 +290,6 @@ async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TY
  
 async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['driver_name'] = update.message.text 
-     
     phone_keyboard = ReplyKeyboardMarkup( 
         [[KeyboardButton("📞 Share Phone Number", request_contact=True)]], 
         one_time_keyboard=True, resize_keyboard=True 
@@ -322,13 +300,12 @@ async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
 async def driver_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
     context.user_data['driver_phone'] = contact.phone_number if contact else update.message.text 
-     
-    await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model** (e.g., Toyota Crown / Sedan):", reply_markup=ReplyKeyboardRemove()) 
+    await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model**:", reply_markup=ReplyKeyboardRemove()) 
     return D_VEHICLE 
  
 async def driver_vehicle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['driver_vehicle'] = update.message.text 
-    await update.message.reply_text("🔢 Please enter your **Car Plate Number** (e.g., 2A-1234):") 
+    await update.message.reply_text("🔢 Please enter your **Car Plate Number**:") 
     return D_PLATE 
  
 async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
@@ -363,8 +340,7 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 f"👤 Name: {data['driver_name']}\n" 
                 f"📞 Phone: `{data['driver_phone']}`\n" 
                 f"🚙 Vehicle: {data['driver_vehicle']}\n" 
-                f"🔢 Plate Number: `{plate_number}`\n" 
-                f"🆔 Telegram ID: `{user.id}`" 
+                f"🔢 Plate Number: `{plate_number}`" 
             ) 
             keyboard = [[InlineKeyboardButton("✅ Approve Driver", callback_data=f"approve_driver_{user.id}")]] 
             await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)) 
@@ -373,234 +349,119 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
              
     return ConversationHandler.END 
  
-# --- DRIVER PACKAGE TOP UP FLOW --- 
 async def topup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
-     
     async with AsyncSessionLocal() as session: 
         res = await session.execute(select(Driver).where(Driver.telegram_id == query.from_user.id)) 
         driver = res.scalar_one_or_none() 
-         
         if not driver or not driver.is_approved: 
             await query.edit_message_text("❌ You are not an approved driver yet.") 
             return ConversationHandler.END 
- 
+
     keyboard = [ 
-        [InlineKeyboardButton("10 Points (10,000 MMK)", callback_data="pkg_10"), 
-         InlineKeyboardButton("50 Points (50,000 MMK)", callback_data="pkg_50")], 
-        [InlineKeyboardButton("100 Points (100,000 MMK)", callback_data="pkg_100"), 
-         InlineKeyboardButton("1,000 Points (1,000,000 MMK)", callback_data="pkg_1000")] 
+        [InlineKeyboardButton("10 Points", callback_data="pkg_10"), InlineKeyboardButton("50 Points", callback_data="pkg_50")], 
+        [InlineKeyboardButton("100 Points", callback_data="pkg_100"), InlineKeyboardButton("1,000 Points", callback_data="pkg_1000")] 
     ] 
-    await query.edit_message_text( 
-        f"💳 **Driver Wallet Top-Up**\n\n" 
-        f"Current Balance: {driver.wallet_balance:,.0f} Points\n" 
-        f"Exchange Rule: `1 Point = {MMK_PER_POINT:,} MMK`\n\n" 
-        f"📦 **Please select a top-up package:**", 
-        parse_mode="Markdown", 
-        reply_markup=InlineKeyboardMarkup(keyboard) 
-    ) 
+    await query.edit_message_text("💳 **Select Top-Up Package:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)) 
     return TOPUP_PKG 
  
 async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
-     
-    pkg_key = query.data 
-    if pkg_key not in TOPUP_PACKAGES: 
-        await query.edit_message_text("❌ Invalid package selected.") 
-        return ConversationHandler.END 
-         
-    pkg = TOPUP_PACKAGES[pkg_key] 
+    pkg = TOPUP_PACKAGES[query.data] 
     context.user_data['topup_points'] = pkg["points"] 
     context.user_data['topup_price'] = pkg["price"] 
-     
-    await query.edit_message_text( 
-        f"💳 **Top-Up Package Selected: {pkg['points']} Points**\n\n" 
-        f"Total Price to Pay: **{pkg['price']:,} MMK**\n\n" 
-        f"Please transfer money to:\n" 
-        f"• KBZPay / WavePay: `09-912345678`\n\n" 
-        f"📸 **After paying, please upload a screenshot of your payment receipt.**", 
-        parse_mode="Markdown" 
-    ) 
+    await query.edit_message_text(f"💳 Send payment for **{pkg['points']} Points ({pkg['price']:,} MMK)** and upload screenshot.") 
     return TOPUP_RECEIPT 
  
 async def topup_receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     if not update.message.photo: 
-        await update.message.reply_text("Please upload a photo image of your payment receipt.") 
+        await update.message.reply_text("Please upload screenshot.") 
         return TOPUP_RECEIPT 
-         
-    photo_file = await update.message.photo[-1].get_file() 
-    file_id = photo_file.file_id 
+    file_id = update.message.photo[-1].file_id 
     user = update.message.from_user 
-     
     points = context.user_data.get('topup_points', 0) 
     price = context.user_data.get('topup_price', 0) 
- 
-    await update.message.reply_text("✅ Receipt uploaded successfully! Pending Admin Approval.", parse_mode="Markdown") 
- 
+    await update.message.reply_text("✅ Uploaded successfully! Pending approval.") 
     if ADMIN_GROUP_ID: 
-        try: 
-            caption = ( 
-                f"💰 **DRIVER TOP-UP REQUEST**\n\n" 
-                f"👤 Driver ID: `{user.id}`\n" 
-                f"🏷 Username: @{user.username if user.username else 'None'}\n" 
-                f"📦 Package: **{points} Points**\n" 
-                f"💵 Amount Paid: **{price:,.0f} MMK**" 
-            ) 
-            keyboard = [ 
-                [InlineKeyboardButton(f"✅ Approve (+{points} Pts)", callback_data=f"tapp_{user.id}_{points}"), 
-                 InlineKeyboardButton("❌ Reject", callback_data=f"trej_{user.id}")] 
-            ] 
-            await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=file_id, caption=caption, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)) 
-        except Exception as e: 
-            logger.error(f"Failed to send topup receipt: {e}") 
-             
+        keyboard = [[InlineKeyboardButton(f"✅ Approve (+{points} Pts)", callback_data=f"tapp_{user.id}_{points}"), InlineKeyboardButton("❌ Reject", callback_data=f"trej_{user.id}")]] 
+        await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=file_id, caption=f"Top-up request: {points} Pts", reply_markup=InlineKeyboardMarkup(keyboard)) 
     return ConversationHandler.END 
  
-# --- ADMIN ACTIONS --- 
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
     await query.answer() 
     data = query.data 
-     
     if data.startswith("approve_driver_"): 
         d_id = int(data.split("_")[2]) 
         async with AsyncSessionLocal() as session: 
-            res = await session.execute(select(Driver).where(Driver.telegram_id == d_id)) 
-            driver = res.scalar_one_or_none() 
+            driver = (await session.execute(select(Driver).where(Driver.telegram_id == d_id))).scalar_one_or_none() 
             if driver: 
                 driver.is_approved = True 
                 await session.commit() 
-         
         await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED") 
-        try: 
-            invite_link = await context.bot.create_chat_invite_link(chat_id=DRIVER_GROUP_ID, member_limit=1) 
-            join_msg = f"🎉 Your driver account is approved!\n\nPlease join the Driver Group here: {invite_link.invite_link}" 
-        except Exception: 
-            join_msg = "🎉 Your driver account is approved!" 
-        await context.bot.send_message(chat_id=d_id, text=join_msg) 
- 
+        await context.bot.send_message(chat_id=d_id, text="🎉 Your driver account is approved!") 
     elif data.startswith("tapp_"): 
-        parts = data.split("_") 
-        d_id = int(parts[1]) 
-        points_to_add = float(parts[2]) 
-         
+        _, d_id_str, pts_str = data.split("_") 
+        d_id, pts = int(d_id_str), float(pts_str) 
         async with AsyncSessionLocal() as session: 
-            res = await session.execute(select(Driver).where(Driver.telegram_id == d_id)) 
-            driver = res.scalar_one_or_none() 
+            driver = (await session.execute(select(Driver).where(Driver.telegram_id == d_id))).scalar_one_or_none() 
             if driver: 
-                driver.wallet_balance += points_to_add 
-                tx = WalletTransaction(driver_telegram_id=d_id, amount=points_to_add, type="TOP_UP") 
-                session.add(tx) 
+                driver.wallet_balance += pts 
+                session.add(WalletTransaction(driver_telegram_id=d_id, amount=pts, type="TOP_UP")) 
                 await session.commit() 
-                new_balance = driver.wallet_balance 
-                 
-        await query.edit_message_caption(caption=query.message.caption + f"\n\n✅ **APPROVED (+{points_to_add:,.0f} POINTS)**", parse_mode="Markdown") 
-        await context.bot.send_message( 
-            chat_id=d_id,  
-            text=f"✅ **Top-up Approved!**\nAdmin added **{points_to_add:,.0f} Points** to your wallet.\nNew Balance: **{new_balance:,.0f} Points**",  
-            parse_mode="Markdown" 
-        ) 
- 
+        await query.edit_message_caption(caption=query.message.caption + "\n\n✅ APPROVED") 
+        await context.bot.send_message(chat_id=d_id, text=f"✅ Top-up Approved (+{pts:,.0f} Pts)!") 
     elif data.startswith("trej_"): 
         d_id = int(data.split("_")[1]) 
-        await query.edit_message_caption(caption=query.message.caption + "\n\n❌ **TOP-UP REJECTED**", parse_mode="Markdown") 
-        await context.bot.send_message(chat_id=d_id, text="❌ Your wallet top-up request was rejected by the admin.") 
+        await query.edit_message_caption(caption=query.message.caption + "\n\n❌ REJECTED") 
+        await context.bot.send_message(chat_id=d_id, text="❌ Top-up rejected.") 
  
-# --- ACCEPT JOB (DYNAMIC POINT DEDUCTION & INFO SHARING) --- 
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
     driver_user = query.from_user 
     b_id = query.data.split("_")[1] 
      
     async with AsyncSessionLocal() as session: 
-        d_res = await session.execute(select(Driver).where(Driver.telegram_id == driver_user.id)) 
-        driver = d_res.scalar_one_or_none() 
-         
+        driver = (await session.execute(select(Driver).where(Driver.telegram_id == driver_user.id))).scalar_one_or_none() 
         if not driver or not driver.is_approved: 
-            await query.answer("❌ You are not an approved driver yet!", show_alert=True) 
+            await query.answer("❌ You are not an approved driver!", show_alert=True) 
             return 
  
-        b_res = await session.execute(select(Booking).where(Booking.id == b_id).with_for_update()) 
-        booking = b_res.scalar_one_or_none() 
-         
+        booking = (await session.execute(select(Booking).where(Booking.id == b_id).with_for_update())).scalar_one_or_none() 
         if not booking or booking.status != "AVAILABLE": 
-            await query.answer("❌ Sorry, this job is no longer available!", show_alert=True) 
+            await query.answer("❌ Job no longer available!", show_alert=True) 
             return 
              
-        # Rule: TAXI deducts 1 pt, Hourly deducts equivalent to hours.
         required_points = 1.0 if booking.vehicle == "TAXI" else float(booking.hours) 
-         
         if driver.wallet_balance < required_points: 
-            await query.answer(f"❌ Insufficient points ({driver.wallet_balance:,.0f}). Required: {required_points:,.0f} Points. Top up needed!", show_alert=True) 
+            await query.answer(f"❌ Insufficient points. Required: {required_points:,.0f}", show_alert=True) 
             return 
  
         driver.wallet_balance -= required_points 
         booking.status = "ASSIGNED" 
         booking.driver_id = driver.telegram_id 
         booking.driver_name = driver.name 
-         
-        tx = WalletTransaction( 
-            driver_telegram_id=driver.telegram_id, 
-            amount=-required_points, 
-            type="COMMISSION", 
-            booking_id=booking.id 
-        ) 
-        session.add(tx) 
+        session.add(WalletTransaction(driver_telegram_id=driver.telegram_id, amount=-required_points, type="COMMISSION", booking_id=booking.id)) 
         await session.commit() 
  
         customer_phone = getattr(booking, 'customer_phone', None) or 'N/A'
         driver_phone = getattr(driver, 'phone', None) or 'N/A'
-        
-        booking_hours = booking.hours 
-        if booking.vehicle == "TAXI":
-            hours_label = "Point-to-Point (TAXI)"
-            fare_display = "Negotiate directly with customer"
-        else:
-            hours_label = "1 Day (10 Hours)" if booking_hours == 10 else f"{booking_hours} Hours" 
-            fare_display = f"{booking.fare_mmk:,.0f} MMK"
+        hours_label = "Point-to-Point (TAXI)" if booking.vehicle == "TAXI" else f"{booking.hours} Hours" 
+        fare_display = "Negotiate directly with customer" if booking.vehicle == "TAXI" else f"{booking.fare_mmk:,.0f} MMK"
          
-        # 1. Clear details from Dispatch Group 
-        await query.edit_message_text( 
-            text=f"🔒 **JOB #{b_id} ACCEPTED**\n\n" 
-                 f"Driver: {driver.name} (@{driver_user.username if driver_user.username else 'NoUsername'})\n" 
-                 f"Status: Job is locked and no longer available.", 
-            parse_mode="Markdown" 
-        ) 
-        await query.answer("✅ Job accepted successfully!") 
+        await query.edit_message_text(text=f"🔒 **JOB #{b_id} ACCEPTED**\nDriver: {driver.name}", parse_mode="Markdown") 
+        await query.answer("✅ Job accepted!") 
  
-        # 2. Send complete Trip details & Customer contact privately to the Driver 
-        driver_trip_msg = ( 
-            f"📋 **ACCEPTED TRIP DETAILS (#{b_id})**\n\n" 
-            f"📅 Date: {booking.date_str} | 🕐 Time: {booking.time_str}\n" 
-            f"⏱ Package: {hours_label}\n" 
-            f"🚙 Vehicle Type: {booking.vehicle}\n" 
-            f"👥 Passengers: {booking.passengers}\n" 
-            f"📍 Location:\n{booking.location}\n" 
-            f"📞 **Customer Phone:** `{customer_phone}`\n" 
-            f"💰 Fare to Collect: **{fare_display}**\n\n" 
-            f"Please call the customer to confirm the trip details." 
-        ) 
-        kb_driver = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]] 
-        await context.bot.send_message( 
-            chat_id=driver_user.id,  
-            text=driver_trip_msg,  
-            parse_mode="Markdown",  
-            reply_markup=InlineKeyboardMarkup(kb_driver), 
-            disable_web_page_preview=True 
+        await context.bot.send_message(
+            chat_id=driver_user.id, 
+            text=f"📋 **ACCEPTED TRIP (#{b_id})**\nVehicle: {booking.vehicle}\nLocation:\n{booking.location}\n📞 **Customer Phone:** `{customer_phone}`\nFare: **{fare_display}**", 
+            parse_mode="Markdown", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]])
         ) 
  
-        # 3. Send Driver info & Driver contact privately to the Customer 
-        customer_msg = ( 
-            f"🚖 **DRIVER ASSIGNED!**\n\n" 
-            f"Your driver is on the way for Booking `{b_id}`.\n\n" 
-            f"👨‍✈️ **Driver Name:** {driver.name}\n" 
-            f"📞 **Driver Phone:** `{driver_phone}`\n" 
-            f"🏷 **Telegram:** @{driver_user.username if driver_user.username else 'N/A'}\n\n" 
-            f"You can contact your driver directly." 
-        ) 
-        await context.bot.send_message(chat_id=booking.customer_id, text=customer_msg, parse_mode="Markdown") 
+        await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **DRIVER ASSIGNED!**\nName: {driver.name}\nPhone: `{driver_phone}`", parse_mode="Markdown") 
  
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
@@ -608,44 +469,31 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action, b_id = query.data.split("_") 
      
     async with AsyncSessionLocal() as session: 
-        res = await session.execute(select(Booking).where(Booking.id == b_id)) 
-        booking = res.scalar_one_or_none() 
+        booking = (await session.execute(select(Booking).where(Booking.id == b_id))).scalar_one_or_none() 
         if not booking: 
             return 
-             
         if action == "arrived": 
             booking.status = "DRIVER_ARRIVED" 
             await session.commit() 
-            kb = [[InlineKeyboardButton("▶️ Start Trip", callback_data=f"starttrip_{b_id}")]] 
-            await query.edit_message_text(text=f"📍 **JOB #{b_id}**\nStatus: Driver Arrived", reply_markup=InlineKeyboardMarkup(kb)) 
-            await context.bot.send_message(chat_id=booking.customer_id, text=f"📍 Your driver has arrived at the pickup location.") 
- 
+            await query.edit_message_text(text=f"📍 **JOB #{b_id}**\nDriver Arrived", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Start Trip", callback_data=f"starttrip_{b_id}")]])) 
+            await context.bot.send_message(chat_id=booking.customer_id, text="📍 Driver has arrived.") 
         elif action == "starttrip": 
             booking.status = "TRIP_STARTED" 
             await session.commit() 
-            kb = [[InlineKeyboardButton("🏁 End Trip", callback_data=f"endtrip_{b_id}")]] 
-            await query.edit_message_text(text=f"▶️ **JOB #{b_id}**\nStatus: Trip Started", reply_markup=InlineKeyboardMarkup(kb)) 
-            await context.bot.send_message(chat_id=booking.customer_id, text=f"▶️ Your trip has started. Have a safe journey!") 
- 
+            await query.edit_message_text(text=f"▶️ **JOB #{b_id}**\nTrip Started", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏁 End Trip", callback_data=f"endtrip_{b_id}")]])) 
+            await context.bot.send_message(chat_id=booking.customer_id, text="▶️ Trip started.") 
         elif action == "endtrip": 
             booking.status = "TRIP_COMPLETED" 
             await session.commit() 
-            await query.edit_message_text(text=f"🏁 **JOB #{b_id}**\nStatus: Completed Successfully!") 
-            await context.bot.send_message(chat_id=booking.customer_id, text=f"🏁 **Rental Completed!** Thank you for riding with us!") 
- 
-# --- APP STARTUP --- 
+            await query.edit_message_text(text=f"🏁 **JOB #{b_id}**\nCompleted") 
+            await context.bot.send_message(chat_id=booking.customer_id, text="🏁 Trip completed.") 
+
 @app.on_event("startup") 
 async def startup_event(): 
     global telegram_app 
-    try: 
-        await init_db() 
-        logger.info("Database connected successfully!") 
-    except Exception as e: 
-        logger.error(f"Database Connection Failed: {e}") 
-     
+    await init_db() 
     telegram_app = Application.builder().token(BOT_TOKEN).build() 
      
-    # Customer Booking Conversation 
     conv_handler = ConversationHandler( 
         entry_points=[CommandHandler("start", start), CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")], 
         states={ 
@@ -661,7 +509,6 @@ async def startup_event():
         fallbacks=[CommandHandler("start", start)] 
     ) 
  
-    # Driver Registration Flow 
     driver_conv = ConversationHandler( 
         entry_points=[CallbackQueryHandler(driver_register_start, pattern="^driver_register$")], 
         states={ 
@@ -673,7 +520,6 @@ async def startup_event():
         fallbacks=[CommandHandler("start", start)] 
     ) 
  
-    # Driver Package Top-Up Flow 
     topup_conv = ConversationHandler( 
         entry_points=[CallbackQueryHandler(topup_start, pattern="^topup_start$")], 
         states={ 
@@ -693,7 +539,6 @@ async def startup_event():
     telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)")) 
  
     await telegram_app.initialize() 
- 
     if RUN_MODE == "webhook": 
         await telegram_app.start() 
         await telegram_app.bot.set_webhook(url=f"{WEBHOOK_URL}/telegram", secret_token=WEBHOOK_SECRET) 
