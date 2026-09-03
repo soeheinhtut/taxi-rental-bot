@@ -40,7 +40,7 @@ TOPUP_PACKAGES = {
     "pkg_1000": {"points": 1000, "price": 1000 * MMK_PER_POINT},
 }
 
-# Conversation States - Added DROP_LOCATION
+# Conversation States (Added DROP_LOCATION)
 VEHICLE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, PASSENGERS, C_PHONE = range(8)
 D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(8, 12)
 TOPUP_PKG, TOPUP_RECEIPT = range(12, 14)
@@ -82,7 +82,7 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
             f"👤 **Driver Wallet Status**\n\n"
             f"Name: {driver.name}\n"
             f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
-            f"*(1 Hour = 1 Point deduction | 1 Day = 10 Points deduction)*",
+            f"*(1 Hour / TAXI Trip = 1 Point deduction | 1 Day = 10 Points deduction)*",
             parse_mode="Markdown"
         )
 
@@ -99,7 +99,7 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
             f"👤 **Driver Wallet Status**\n\n"
             f"Name: {driver.name}\n"
             f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**\n"
-            f"*(1 Hour = 1 Point deduction | 1 Day = 10 Points deduction)*",
+            f"*(1 Hour / TAXI Trip = 1 Point deduction | 1 Day = 10 Points deduction)*",
             parse_mode="Markdown"
         )
 
@@ -122,31 +122,28 @@ async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
     context.user_data['vehicle'] = query.data
     
-    await query.edit_message_text(f"🚘 Vehicle: **{query.data}**\n\n📅 Enter Rental Date (e.g., 26 Aug 2026):", parse_mode="Markdown")
+    await query.edit_message_text(f"🚘 Vehicle: **{query.data}**\n\n📅 Enter Date (e.g., 26 Aug 2026 or 'Today'):", parse_mode="Markdown")
     return DATE
 
 async def date_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['date'] = update.message.text
-    await update.message.reply_text("🕐 Enter Pickup Time (e.g., 10:00 AM):")
+    await update.message.reply_text("🕐 Enter Pickup Time (e.g., 10:00 AM or 'Now'):")
     return TIME
 
 async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['time'] = update.message.text
     vehicle = context.user_data.get('vehicle', 'Sedan')
     
-    # TAXI logic (Skip hours)
+    # TAXI FLOW: Skip hours, go straight to Location
     if vehicle == "TAXI":
-        context.user_data['hours'] = 1  
-        context.user_data['fare'] = 0   
-        
         location_keyboard = ReplyKeyboardMarkup(
             [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
             one_time_keyboard=True, resize_keyboard=True
         )
-        await update.message.reply_text("📍 Please share or type your **Pickup Location**:", reply_markup=location_keyboard)
+        await update.message.reply_text("📍 Please click below to share your exact GPS Pickup Location or type your address:", reply_markup=location_keyboard)
         return LOCATION
 
-    # Normal Rental Logic
+    # HOURLY FLOW
     rate = HOURLY_RATES.get(vehicle, 15000)
     keyboard = [
         [InlineKeyboardButton(f"1 Hour ({1 * rate:,.0f} MMK)", callback_data="1")],
@@ -155,11 +152,8 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         [InlineKeyboardButton(f"6 Hours ({6 * rate:,.0f} MMK)", callback_data="6")],
         [InlineKeyboardButton(f"1 Day / 10 Hours ({10 * rate:,.0f} MMK)", callback_data="10")]
     ]
-    
     await update.message.reply_text(
-        f"⏱ Select Rental Package for **{vehicle}**:\n"
-        f"*(Rate: {rate:,.0f} MMK / hour)*\n\n"
-        f"💡 *(Price and Trip plan details can negotiate directly with the Driver)*",
+        f"⏱ Select Rental Package for **{vehicle}**:\n*(Rate: {rate:,.0f} MMK / hour)*\n\n💡 *(Price and Trip details can negotiate directly with the Driver)*",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -185,9 +179,8 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     )
     
     await query.edit_message_text(
-        f"⏱ **Package Selected:** {hours_label}\n"
-        f"💰 **Total Fare:** {total_fare:,.0f} MMK\n\n"
-        f"📍 Please click below to share your exact GPS pickup location or type your address:",
+        f"⏱ **Package Selected:** {hours_label}\n💰 **Total Fare:** {total_fare:,.0f} MMK\n\n"
+        f"📍 Please share your exact GPS pickup location or type your address:",
         parse_mode="Markdown"
     )
     await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
@@ -195,27 +188,23 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location
-    pickup_loc = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}" if loc else update.message.text
-    
-    vehicle = context.user_data.get('vehicle', 'Sedan')
-    
-    if vehicle == "TAXI":
-        context.user_data['pickup_temp'] = pickup_loc
-        await update.message.reply_text("🏁 Please enter or share your **Drop-off Location**:", reply_markup=ReplyKeyboardRemove())
+    if loc:
+        context.user_data['location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}" 
+    else: 
+        context.user_data['location'] = update.message.text 
+         
+    # If it's a TAXI, ask for Drop-off location next
+    if context.user_data.get('vehicle') == "TAXI":
+        await update.message.reply_text("📍 Please enter your **Drop-off Location** (type address or landmark):", reply_markup=ReplyKeyboardRemove())
         return DROP_LOCATION
-    else:
-        context.user_data['location'] = pickup_loc
-        await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
-        return PASSENGERS 
+
+    # If Hourly, go straight to Passengers
+    await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
+    return PASSENGERS 
 
 async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    loc = update.message.location
-    drop_loc = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}" if loc else update.message.text
-    
-    pickup = context.user_data.get('pickup_temp', '')
-    context.user_data['location'] = f"Pickup: {pickup} | Drop: {drop_loc}"
-    
-    await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
+    context.user_data['drop_location'] = update.message.text
+    await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
 
 async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
@@ -233,28 +222,43 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
  
 async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
-    phone = contact.phone_number if contact else update.message.text 
+    if contact: 
+        phone = contact.phone_number 
+    else: 
+        phone = update.message.text 
          
     context.user_data['customer_phone'] = phone 
     data = context.user_data 
     booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}" 
      
-    is_taxi = data['vehicle'] == "TAXI"
-    points_required = 1.0 if is_taxi else float(data['hours']) 
-    fare_text = "Negotiate with Driver" if is_taxi else f"{data['fare']:,.0f} MMK"
-    hours_label = "Point-to-Point" if is_taxi else ("1 Day (10 Hours)" if data['hours'] == 10 else f"{data['hours']} Hours") 
-     
+    # Differentiate between TAXI and Hourly logic
+    vehicle = data['vehicle']
+    if vehicle == 'TAXI':
+        final_location = f"**Pickup:** {data['location']}\n**Drop-off:** {data.get('drop_location', 'N/A')}"
+        hours_label = "Point-to-Point (TAXI)"
+        points_required = 1.0  # TAXI deductions = 1 Point
+        fare_display = "Negotiate directly with Driver"
+        fare_db_value = 0
+        hours_db_value = 0
+    else:
+        final_location = data['location']
+        hours_label = "1 Day (10 Hours)" if data['hours'] == 10 else f"{data['hours']} Hours"
+        points_required = float(data['hours'])
+        fare_display = f"{data['fare']:,.0f} MMK"
+        fare_db_value = data['fare']
+        hours_db_value = data['hours']
+
     summary = ( 
         f"✅ **BOOKING CONFIRMED**\n\n" 
         f"🆔 Booking ID: `{booking_id}`\n" 
-        f"🚙 Vehicle: {data['vehicle']}\n" 
+        f"🚙 Vehicle: {vehicle}\n" 
         f"📅 Date: {data['date']}\n" 
         f"🕐 Time: {data['time']}\n" 
         f"⏱ Package: {hours_label}\n" 
-        f"📍 Location: {data['location']}\n" 
+        f"📍 Location:\n{final_location}\n" 
         f"👥 Passengers: {data['passengers']}\n" 
         f"📞 Contact: `{phone}`\n\n" 
-        f"💰 **Total Fare: {fare_text}**\n\n" 
+        f"💰 **Total Fare: {fare_display}**\n\n" 
         f"Searching for an available driver. You will be notified once a driver accepts your trip!" 
     ) 
      
@@ -264,17 +268,17 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         booking = Booking( 
             id=booking_id, 
             customer_id=update.message.from_user.id, 
-            vehicle=data['vehicle'], 
+            vehicle=vehicle, 
             date_str=data['date'], 
             time_str=data['time'], 
-            hours=data['hours'], 
-            location=data['location'], 
+            hours=hours_db_value, 
+            location=final_location, 
             passengers=int(data['passengers']), 
-            fare_mmk=data['fare'], 
+            fare_mmk=fare_db_value, 
             status="AVAILABLE", 
             payment_method="DIRECT", 
             payment_receipt_file_id=None,
-            customer_phone=phone  # Added direct assignment
+            customer_phone=phone  # Saved explicitly to database
         ) 
         session.add(booking) 
         await session.commit() 
@@ -282,13 +286,13 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
     if DRIVER_GROUP_ID: 
         try: 
             driver_text = ( 
-                f"🚗 **NEW {'TAXI ' if is_taxi else 'RENTAL '}JOB**\n\n" 
+                f"🚗 **NEW JOB AVAILABLE**\n\n" 
                 f"🆔 `{booking.id}`\n" 
                 f"📅 {booking.date_str} | 🕐 {booking.time_str}\n" 
-                f"📍 Location: {booking.location}\n" 
                 f"⏱ Package: {hours_label} | 👥 {booking.passengers} Pax\n" 
-                f"🚙 Vehicle: {booking.vehicle}\n" 
-                f"💰 Fare: **{fare_text}**\n" 
+                f"🚙 Vehicle: {booking.vehicle}\n"
+                f"📍 **Location:**\n{final_location}\n\n" # Drivers can now see the location
+                f"💰 Fare: **{fare_display}**\n" 
                 f"➕ Commission Deduction: **{points_required:,.0f} Points**" 
             ) 
             kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]] 
@@ -343,12 +347,12 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 username=user.username,  
                 wallet_balance=0.0,  
                 is_approved=False,
-                phone=data['driver_phone'] # Added direct assignment
+                phone=data['driver_phone']  # Saved explicitly to database
             ) 
             session.add(driver) 
         else: 
             driver.name = data['driver_name'] 
-            driver.phone = data['driver_phone'] 
+            driver.phone = data['driver_phone']
         await session.commit() 
          
     await update.message.reply_text("✅ Registration details submitted! Please wait for admin approval.") 
@@ -526,7 +530,7 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Sorry, this job is no longer available!", show_alert=True) 
             return 
              
-        # Fixed point logic for TAXI
+        # Rule check: TAXI deduces 1 pt, Hourly deducts equivalent to hours.
         required_points = 1.0 if booking.vehicle == "TAXI" else float(booking.hours) 
          
         if driver.wallet_balance < required_points: 
@@ -547,13 +551,17 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session.add(tx) 
         await session.commit() 
  
-        # Fix missing phones logic
-        customer_phone = booking.customer_phone if booking.customer_phone else 'N/A'
-        driver_phone = driver.phone if driver.phone else 'N/A'
+        # Fixed getattr fallback for phone numbers
+        customer_phone = getattr(booking, 'customer_phone', None) or 'N/A'
+        driver_phone = getattr(driver, 'phone', None) or 'N/A'
         
-        is_taxi = booking.vehicle == "TAXI"
-        hours_label = "Point-to-Point" if is_taxi else ("1 Day (10 Hours)" if booking.hours == 10 else f"{booking.hours} Hours")
-        fare_text = "Negotiate with Driver" if is_taxi else f"{booking.fare_mmk:,.0f} MMK"
+        booking_hours = booking.hours 
+        if booking.vehicle == "TAXI":
+            hours_label = "Point-to-Point (TAXI)"
+            fare_display = "Negotiate directly with customer"
+        else:
+            hours_label = "1 Day (10 Hours)" if booking_hours == 10 else f"{booking_hours} Hours" 
+            fare_display = f"{booking.fare_mmk:,.0f} MMK"
          
         # 1. Clear details from Dispatch Group 
         await query.edit_message_text( 
@@ -571,9 +579,9 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏱ Package: {hours_label}\n" 
             f"🚙 Vehicle Type: {booking.vehicle}\n" 
             f"👥 Passengers: {booking.passengers}\n" 
-            f"📍 Location: {booking.location}\n" 
+            f"📍 Location:\n{booking.location}\n" 
             f"📞 **Customer Phone:** `{customer_phone}`\n" 
-            f"💰 Fare to Collect: **{fare_text}**\n\n" 
+            f"💰 Fare to Collect: **{fare_display}**\n\n" 
             f"Please call the customer to confirm the trip details." 
         ) 
         kb_driver = [[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]] 
@@ -639,7 +647,7 @@ async def startup_event():
      
     telegram_app = Application.builder().token(BOT_TOKEN).build() 
      
-    # Customer Booking Conversation 
+    # Customer Booking Conversation (Added DROP_LOCATION state)
     conv_handler = ConversationHandler( 
         entry_points=[CommandHandler("start", start), CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")], 
         states={ 
@@ -648,7 +656,7 @@ async def startup_event():
             TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, time_received)], 
             HOURS: [CallbackQueryHandler(hours_chosen)], 
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)], 
-            DROP_LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, drop_location_received)], # Added Drop Location
+            DROP_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, drop_location_received)],
             PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)], 
             C_PHONE: [MessageHandler((filters.TEXT | filters.CONTACT) & ~filters.COMMAND, customer_phone_received)] 
         }, 
