@@ -19,7 +19,6 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 class Driver(Base):
     __tablename__ = "drivers"
-    id: Mapped[int] = mapped_keyword = mapped_column(Integer, primary_key=True, autoincrement=True) if hasattr(Base, 'metadata') else mapped_column(Integer, primary_key=True, autoincrement=True)
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
@@ -59,6 +58,5 @@ class WalletTransaction(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Automatically patch existing tables if columns are missing
         await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(30);"))
         await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS phone VARCHAR(30);"))
