@@ -24,6 +24,7 @@ class Driver(Base):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100))
     username: Mapped[str] = mapped_column(String(100), nullable=True)
+    phone: Mapped[str] = mapped_column(String(50), nullable=True)  # <-- Added phone column
     wallet_balance: Mapped[float] = mapped_column(Float, default=0.0)
     is_approved: Mapped[bool] = mapped_column(default=False)
 
@@ -35,14 +36,15 @@ class Booking(Base):
     date_str: Mapped[str] = mapped_column(String(20))
     time_str: Mapped[str] = mapped_column(String(20))
     hours: Mapped[int] = mapped_column(Integer)
-    location: Mapped[str] = mapped_column(String(255)) # GPS coordinates or text
+    location: Mapped[str] = mapped_column(Text) # <-- Changed to Text to support long pickup/drop-off text
     passengers: Mapped[int] = mapped_column(Integer)
     fare_mmk: Mapped[float] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(30), default="PENDING_PAYMENT") # PENDING_PAYMENT, PAYMENT_REVIEW, AVAILABLE, ASSIGNED, DRIVER_ARRIVED, TRIP_STARTED, TRIP_COMPLETED, CANCELLED
+    status: Mapped[str] = mapped_column(String(30), default="PENDING_PAYMENT") 
     payment_method: Mapped[str] = mapped_column(String(50), nullable=True)
     payment_receipt_file_id: Mapped[str] = mapped_column(String(255), nullable=True)
     driver_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     driver_name: Mapped[str] = mapped_column(String(100), nullable=True)
+    customer_phone: Mapped[str] = mapped_column(String(50), nullable=True)  # <-- Added customer_phone column
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class WalletTransaction(Base):
