@@ -401,7 +401,25 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 driver.is_approved = True 
                 await session.commit() 
         await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED") 
-        await context.bot.send_message(chat_id=d_id, text="🎉 Your driver account is approved!") 
+        
+        # Make invite link for Driver Dispatch Group
+        invite_link = None
+        if DRIVER_GROUP_ID:
+            try:
+                invite = await context.bot.create_chat_invite_link(chat_id=DRIVER_GROUP_ID, member_limit=1)
+                invite_link = invite.invite_link
+            except Exception as e:
+                logger.error(f"Failed to create invite link: {e}")
+
+        # Send link to driver
+        if invite_link:
+            await context.bot.send_message(
+                chat_id=d_id, 
+                text=f"🎉 Your driver account is approved!\n\nJoin the Driver Dispatch Group here: {invite_link}"
+            )
+        else:
+            await context.bot.send_message(chat_id=d_id, text="🎉 Your driver account is approved!")
+            
     elif data.startswith("tapp_"): 
         _, d_id_str, pts_str = data.split("_") 
         d_id, pts = int(d_id_str), float(pts_str) 
