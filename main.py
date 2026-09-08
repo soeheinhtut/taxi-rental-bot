@@ -74,12 +74,16 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("❌ You are not an approved driver yet.")
             return
 
-        await query.edit_message_text(
-            f"👤 **Driver Wallet Status**\n\n"
-            f"Name: {driver.name}\n"
-            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**",
-            parse_mode="Markdown"
+       # <--- UPDATED: Displays driver name, balance, phone, car model, and plate number
+        text = (
+            f"👤 **Driver Profile & Wallet Status**\n\n"
+            f"📛 Name: {driver.name}\n"
+            f"💰 Point Balance: **{driver.wallet_balance:,.0f} Points**\n"
+            f"📞 Phone: `{driver.phone}`\n"
+            f"🚙 Car Model: {driver.car_model}\n"
+            f"🔢 License Plate: `{driver.license_plate}`"
         )
+        await query.edit_message_text(text, parse_mode="Markdown") # <--- UPDATED
 
 async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with AsyncSessionLocal() as session:
@@ -90,12 +94,16 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("❌ You are not an approved driver yet.")
             return
 
-        await update.message.reply_text(
-            f"👤 **Driver Wallet Status**\n\n"
-            f"Name: {driver.name}\n"
-            f"Remaining Balance: **{driver.wallet_balance:,.0f} Points**",
-            parse_mode="Markdown"
+        # <--- UPDATED: Displays driver name, balance, phone, car model, and plate number
+        text = (
+            f"👤 **Driver Profile & Wallet Status**\n\n"
+            f"📛 Name: {driver.name}\n"
+            f"💰 Point Balance: **{driver.wallet_balance:,.0f} Points**\n"
+            f"📞 Phone: `{driver.phone}`\n"
+            f"🚙 Car Model: {driver.car_model}\n"
+            f"🔢 License Plate: `{driver.license_plate}`"
         )
+        await update.message.reply_text(text, parse_mode="Markdown") # <--- UPDATED
 
 async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
