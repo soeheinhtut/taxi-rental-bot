@@ -32,6 +32,7 @@ HOURLY_RATES = {
 }
 
 TOPUP_PACKAGES = {
+    "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},       # <--- ADDED
     "pkg_10": {"points": 10, "price": 10 * MMK_PER_POINT},
     "pkg_50": {"points": 50, "price": 50 * MMK_PER_POINT},
     "pkg_100": {"points": 100, "price": 100 * MMK_PER_POINT},
@@ -364,6 +365,7 @@ async def topup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             return ConversationHandler.END 
 
     keyboard = [ 
+        [InlineKeyboardButton("1 Point", callback_data="pkg_1"),
         [InlineKeyboardButton("10 Points", callback_data="pkg_10"), InlineKeyboardButton("50 Points", callback_data="pkg_50")], 
         [InlineKeyboardButton("100 Points", callback_data="pkg_100"), InlineKeyboardButton("1,000 Points", callback_data="pkg_1000")] 
     ] 
@@ -376,7 +378,15 @@ async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
     pkg = TOPUP_PACKAGES[query.data] 
     context.user_data['topup_points'] = pkg["points"] 
     context.user_data['topup_price'] = pkg["price"] 
-    await query.edit_message_text(f"💳 Send payment for **{pkg['points']} Points ({pkg['price']:,} MMK)** and upload screenshot.") 
+
+    # Added payment info with your phone number and wallets
+    text = (
+        f"💳 Send payment for **{pkg['points']} Points ({pkg['price']:,} MMK)**\n\n"
+        f"📲 **Transfer to (KBZPay / AYAPay / WAVEPay):**\n"
+        f"Phone: `09254417659`\n\n"
+        f"📸 After transfer, please upload your screenshot here."
+    )
+    await query.edit_message_text(text, parse_mode="Markdown")
     return TOPUP_RECEIPT 
  
 async def topup_receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
