@@ -111,9 +111,9 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     
     keyboard = [
         [InlineKeyboardButton("🚕 TAXI (Point-to-Point)", callback_data="TAXI")],
-        [InlineKeyboardButton("Sedan (15,000 MMK / hr)", callback_data="Sedan")],
-        [InlineKeyboardButton("SUV (20,000 MMK / hr)", callback_data="SUV")],
-        [InlineKeyboardButton("Alphard / VIP (25,000 MMK / hr)", callback_data="Alphard / VIP")]
+        [InlineKeyboardButton("Sedan (20,000 MMK / hr)", callback_data="Sedan")],                 # <--- UPDATED
+        [InlineKeyboardButton("SUV (25,000 MMK / hr)", callback_data="SUV")],                     # <--- UPDATED
+        [InlineKeyboardButton("Alphard / VIP (30,000 MMK / hr)", callback_data="Alphard / VIP")]  # <--- UPDATED
     ]
     await query.edit_message_text("🚘 Select Vehicle Type:", reply_markup=InlineKeyboardMarkup(keyboard))
     return VEHICLE
@@ -142,7 +142,7 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text("📍 Please click below to share your exact GPS Pickup Location or type your address:", reply_markup=location_keyboard)
         return LOCATION
 
-    rate = HOURLY_RATES.get(vehicle, 15000)
+    rate = HOURLY_RATES.get(vehicle, 20000)   # <--- UPDATED default fallback rate
     keyboard = [
         [InlineKeyboardButton(f"1 Hour ({1 * rate:,.0f} MMK)", callback_data="1")],
         [InlineKeyboardButton(f"2 Hours ({2 * rate:,.0f} MMK)", callback_data="2")],
