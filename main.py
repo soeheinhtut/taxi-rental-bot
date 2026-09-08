@@ -26,9 +26,9 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
 MMK_PER_POINT = 1000
 
 HOURLY_RATES = {
-    "Sedan": 15000,
-    "SUV": 20000,
-    "Alphard / VIP": 25000
+    "Sedan": 20000,
+    "SUV": 25000,
+    "Alphard / VIP": 30000
 }
 
 TOPUP_PACKAGES = {
@@ -54,7 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         [InlineKeyboardButton("🚗 Book a Car", callback_data="start_booking")],
         [InlineKeyboardButton("👨‍✈️ Driver Register", callback_data="driver_register")],
         [InlineKeyboardButton("💳 Driver Top Up", callback_data="topup_start")],
-        [InlineKeyboardButton("💰 Check Balance", callback_data="driver_balance")]
+        [InlineKeyboardButton("💰 Driver Profile & Check Balance", callback_data="driver_balance")]
     ]
     await update.message.reply_text(
         "Welcome to Taxi Rental Service! Please choose an option:",
