@@ -26,6 +26,8 @@ class Driver(Base):
     wallet_balance: Mapped[float] = mapped_column(Float, default=0.0)
     is_approved: Mapped[bool] = mapped_column(default=False)
     phone: Mapped[str] = mapped_column(String(30), nullable=True)
+    car_model: Mapped[str] = mapped_column(String(100), nullable=True)     # <--- ADDED
+    license_plate: Mapped[str] = mapped_column(String(50), nullable=True) # <--- ADDED
 
 class Booking(Base):
     __tablename__ = "bookings"
@@ -60,3 +62,5 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(30);"))
         await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS phone VARCHAR(30);"))
+        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_model VARCHAR(100);"))     # <--- ADDED
+        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS license_plate VARCHAR(50);")) # <--- ADDED
