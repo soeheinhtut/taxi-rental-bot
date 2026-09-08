@@ -323,7 +323,7 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 username=user.username,  
                 wallet_balance=0.0,  
                 is_approved=False,
-                phone=data['driver_phone'] 
+                phone=data['driver_phone'], 
                 car_model=data['driver_vehicle'],     # <--- ADDED
                 license_plate=plate_number           # <--- ADDED
             ) 
