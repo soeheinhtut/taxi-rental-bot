@@ -324,11 +324,15 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 wallet_balance=0.0,  
                 is_approved=False,
                 phone=data['driver_phone'] 
+                car_model=data['driver_vehicle'],     # <--- ADDED
+                license_plate=plate_number           # <--- ADDED
             ) 
             session.add(driver) 
         else: 
             driver.name = data['driver_name'] 
             driver.phone = data['driver_phone']
+            driver.car_model = data['driver_vehicle']     # <--- ADDED
+            driver.license_plate = plate_number           # <--- ADDED
         await session.commit() 
          
     await update.message.reply_text("✅ Registration details submitted! Please wait for admin approval.") 
