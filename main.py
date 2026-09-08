@@ -322,7 +322,7 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 telegram_id=user.id,  
                 name=data['driver_name'],  
                 username=user.username,  
-                wallet_balance=0.0,  
+                wallet_balance=1.0,  # <--- WELCOME BONUS (1 Point)
                 is_approved=False,
                 phone=data['driver_phone'], 
                 car_model=data['driver_vehicle'],     # <--- ADDED
@@ -336,12 +336,12 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
             driver.license_plate = plate_number           # <--- ADDED
         await session.commit() 
          
-    await update.message.reply_text("✅ Registration details submitted! Please wait for admin approval.") 
+    await update.message.reply_text("✅ Registration details submitted! You received **1 Welcome Point** 🎉. Please wait for admin approval.", parse_mode="Markdown")
      
     if ADMIN_GROUP_ID: 
         try: 
             text = ( 
-                f"👨‍✈️ **NEW DRIVER REGISTRATION**\n\n" 
+                f"👨‍✈️ **NEW DRIVER REGISTRATION (1 Pt Bonus)**\n\n"
                 f"👤 Name: {data['driver_name']}\n" 
                 f"📞 Phone: `{data['driver_phone']}`\n" 
                 f"🚙 Vehicle: {data['driver_vehicle']}\n" 
