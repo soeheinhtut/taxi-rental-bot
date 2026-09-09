@@ -1,5 +1,6 @@
 import os
 import logging
+import calendar  # <--- UPDATED
 from datetime import datetime
 from fastapi import FastAPI, Request
 from telegram import (
@@ -32,7 +33,7 @@ HOURLY_RATES = {
 }
 
 TOPUP_PACKAGES = {
-    "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},
+    "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},       
     "pkg_10": {"points": 10, "price": 10 * MMK_PER_POINT},
     "pkg_50": {"points": 50, "price": 50 * MMK_PER_POINT},
     "pkg_100": {"points": 100, "price": 100 * MMK_PER_POINT},
@@ -45,6 +46,51 @@ TOPUP_PKG, TOPUP_RECEIPT = range(12, 14)
 
 app = FastAPI()
 telegram_app = None
+
+# <--- UPDATED: Function to build inline calendar
+def get_calendar_keyboard(year, month):
+    keyboard = []
+    keyboard.append([InlineKeyboardButton(f"{calendar.month_name[month]} {year}", callback_data="ignore")])
+    keyboard.append([InlineKeyboardButton(day, callback_data="ignore") for day in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]])
+    
+    month_calendar = calendar.monthcalendar(year, month)
+    for week in month_calendar:
+        row = []
+        for day in week:
+            if day == 0:
+                row.append(InlineKeyboardButton(" ", callback_data="ignore"))
+            else:
+                row.append(InlineKeyboardButton(str(day), callback_data=f"date_{year}_{month}_{day}"))
+        keyboard.append(row)
+        
+    prev_month = month - 1 if month > 1 else 12
+    prev_year = year if month > 1 else year - 1
+    next_month = month + 1 if month < 12 else 1
+    next_year = year if month < 12 else year + 1
+    
+    keyboard.append([
+        InlineKeyboardButton("⏪", callback_data=f"cal_{prev_year}_{prev_month}"),
+        InlineKeyboardButton("⏩", callback_data=f"cal_{next_year}_{next_month}")
+    ])
+    return InlineKeyboardMarkup(keyboard)
+
+# <--- UPDATED: Function to build time selection keyboard
+def get_time_keyboard():
+    keyboard = []
+    times = [
+        "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM",
+        "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM",
+        "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM",
+        "07:00 PM", "08:00 PM", "09:00 PM", "10:00 PM"
+    ]
+    for i in range(0, len(times), 2):
+        row = [
+            InlineKeyboardButton(times[i], callback_data=f"time_{times[i]}"),
+            InlineKeyboardButton(times[i+1], callback_data=f"time_{times[i+1]}")
+        ]
+        keyboard.append(row)
+    return InlineKeyboardMarkup(keyboard)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
@@ -109,9 +155,9 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     
     keyboard = [
         [InlineKeyboardButton("🚕 TAXI (Point-to-Point)", callback_data="TAXI")],
-        [InlineKeyboardButton("Sedan (20,000 MMK / hr)", callback_data="Sedan")],
-        [InlineKeyboardButton("SUV (25,000 MMK / hr)", callback_data="SUV")],
-        [InlineKeyboardButton("Alphard / VIP (30,000 MMK / hr)", callback_data="Alphard / VIP")]
+        [InlineKeyboardButton("Sedan (20,000 MMK / hr)", callback_data="Sedan")],                 
+        [InlineKeyboardButton("SUV (25,000 MMK / hr)", callback_data="SUV")],                     
+        [InlineKeyboardButton("Alphard / VIP (30,000 MMK / hr)", callback_data="Alphard / VIP")]  
     ]
     await query.edit_message_text("🚘 Select Vehicle Type:", reply_markup=InlineKeyboardMarkup(keyboard))
     return VEHICLE
@@ -120,40 +166,51 @@ async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     context.user_data['vehicle'] = query.data
-    await query.edit_message_text(f"🚘 Vehicle: **{query.data}**\n\n📅 Enter Date (e.g., YYYY-MM-DD or 26-08-2026):", parse_mode="Markdown") # <--- UPDATED
+    
+    now = datetime.now() # <--- UPDATED
+    reply_markup = get_calendar_keyboard(now.year, now.month) # <--- UPDATED
+    
+    await query.edit_message_text(
+        f"🚘 Vehicle: **{query.data}**\n\n📅 Select Date:", # <--- UPDATED
+        reply_markup=reply_markup, # <--- UPDATED
+        parse_mode="Markdown"
+    )
     return DATE
 
-async def date_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    raw_date = update.message.text.strip() # <--- UPDATED
-    formatted_date = raw_date # <--- UPDATED
-    
-    # Try parsing common date formats to standardize to YYYY-MM-DD
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d %B %Y"): # <--- UPDATED
-        try: # <--- UPDATED
-            parsed_d = datetime.strptime(raw_date, fmt) # <--- UPDATED
-            formatted_date = parsed_d.strftime("%Y-%m-%d") # <--- UPDATED
-            break # <--- UPDATED
-        except ValueError: # <--- UPDATED
-            continue # <--- UPDATED
+# <--- UPDATED: New callback logic for Date selection calendar
+async def date_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
+    query = update.callback_query
+    await query.answer()
+    data = query.data
 
-    context.user_data['date'] = formatted_date # <--- UPDATED
-    await update.message.reply_text("🕐 Enter Pickup Time (e.g., 10:00 AM or 14:30):") # <--- UPDATED
-    return TIME
+    if data == "ignore":
+        return DATE
 
-async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    raw_time = update.message.text.strip() # <--- UPDATED
-    formatted_time = raw_time # <--- UPDATED
-    
-    # Try parsing common time formats to standardize to HH:MM AM/PM
-    for fmt in ("%I:%M %p", "%I:%M%p", "%H:%M"): # <--- UPDATED
-        try: # <--- UPDATED
-            parsed_t = datetime.strptime(raw_time, fmt) # <--- UPDATED
-            formatted_time = parsed_t.strftime("%I:%M %p") # <--- UPDATED
-            break # <--- UPDATED
-        except ValueError: # <--- UPDATED
-            continue # <--- UPDATED
+    if data.startswith("cal_"):
+        _, year, month = data.split("_")
+        reply_markup = get_calendar_keyboard(int(year), int(month))
+        await query.edit_message_reply_markup(reply_markup=reply_markup)
+        return DATE
 
-    context.user_data['time'] = formatted_time # <--- UPDATED
+    if data.startswith("date_"):
+        _, year, month, day = data.split("_")
+        selected_date = f"{year}-{int(month):02d}-{int(day):02d}"
+        context.user_data['date'] = selected_date
+
+        reply_markup = get_time_keyboard()
+        await query.edit_message_text(
+            f"📅 Date: **{selected_date}**\n\n🕐 Select Pickup Time:", 
+            reply_markup=reply_markup, 
+            parse_mode="Markdown"
+        )
+        return TIME
+
+# <--- UPDATED: New callback logic for Time selection 
+async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    selected_time = query.data.split("_")[1]
+    context.user_data['time'] = selected_time
     vehicle = context.user_data.get('vehicle', 'Sedan')
     
     if vehicle == "TAXI":
@@ -161,10 +218,14 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
             one_time_keyboard=True, resize_keyboard=True
         )
-        await update.message.reply_text("📍 Please click below to share your exact GPS Pickup Location or type your address:", reply_markup=location_keyboard)
+        await query.edit_message_text(
+            f"🕐 Time: **{selected_time}**\n\n📍 Please share your exact GPS Pickup Location or type your address:", 
+            parse_mode="Markdown"
+        )
+        await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
         return LOCATION
 
-    rate = HOURLY_RATES.get(vehicle, 20000)
+    rate = HOURLY_RATES.get(vehicle, 20000)   
     keyboard = [
         [InlineKeyboardButton(f"1 Hour ({1 * rate:,.0f} MMK)", callback_data="1")],
         [InlineKeyboardButton(f"2 Hours ({2 * rate:,.0f} MMK)", callback_data="2")],
@@ -172,8 +233,8 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         [InlineKeyboardButton(f"6 Hours ({6 * rate:,.0f} MMK)", callback_data="6")],
         [InlineKeyboardButton(f"1 Day / 10 Hours ({10 * rate:,.0f} MMK)", callback_data="10")]
     ]
-    await update.message.reply_text(
-        f"⏱ Select Rental Package for **{vehicle}**:\n*(Rate: {rate:,.0f} MMK / hour)*",
+    await query.edit_message_text(
+        f"🕐 Time: **{selected_time}**\n\n⏱ Select Rental Package for **{vehicle}**:\n*(Rate: {rate:,.0f} MMK / hour)*",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -242,7 +303,7 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
          
     context.user_data['customer_phone'] = phone 
     data = context.user_data 
-    booking_id = f"RNT-{datetime.now().strftime('%Y%m%d-%H%M%S')}" # <--- UPDATED
+    booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}" 
      
     vehicle = data['vehicle']
     if vehicle == 'TAXI':
@@ -352,18 +413,18 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 telegram_id=user.id,  
                 name=data['driver_name'],  
                 username=user.username,  
-                wallet_balance=1.0, 
+                wallet_balance=1.0,  
                 is_approved=False,
                 phone=data['driver_phone'], 
-                car_model=data['driver_vehicle'], 
-                license_plate=plate_number 
+                car_model=data['driver_vehicle'],     
+                license_plate=plate_number            
             ) 
             session.add(driver) 
         else: 
             driver.name = data['driver_name'] 
             driver.phone = data['driver_phone']
-            driver.car_model = data['driver_vehicle'] 
-            driver.license_plate = plate_number 
+            driver.car_model = data['driver_vehicle']     
+            driver.license_plate = plate_number            
         await session.commit() 
          
     await update.message.reply_text("✅ Registration details submitted! You received **1 Welcome Point** 🎉. Please wait for admin approval.", parse_mode="Markdown")
@@ -557,8 +618,8 @@ async def startup_event():
         entry_points=[CommandHandler("start", start), CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")], 
         states={ 
             VEHICLE: [CallbackQueryHandler(vehicle_chosen)], 
-            DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, date_received)], 
-            TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, time_received)], 
+            DATE: [CallbackQueryHandler(date_chosen)], # <--- UPDATED (Uses calendar buttons now)
+            TIME: [CallbackQueryHandler(time_chosen)], # <--- UPDATED (Uses time buttons now)
             HOURS: [CallbackQueryHandler(hours_chosen)], 
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)], 
             DROP_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, drop_location_received)],
