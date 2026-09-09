@@ -32,7 +32,7 @@ HOURLY_RATES = {
 }
 
 TOPUP_PACKAGES = {
-    "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},       # <--- ADDED
+    "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},
     "pkg_10": {"points": 10, "price": 10 * MMK_PER_POINT},
     "pkg_50": {"points": 50, "price": 50 * MMK_PER_POINT},
     "pkg_100": {"points": 100, "price": 100 * MMK_PER_POINT},
@@ -74,7 +74,6 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
             await query.edit_message_text("❌ You are not an approved driver yet.")
             return
 
-       # <--- UPDATED: Displays driver name, balance, phone, car model, and plate number
         text = (
             f"👤 **Driver Profile & Wallet Status**\n\n"
             f"📛 Name: {driver.name}\n"
@@ -83,7 +82,7 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
             f"🚙 Car Model: {driver.car_model}\n"
             f"🔢 License Plate: `{driver.license_plate}`"
         )
-        await query.edit_message_text(text, parse_mode="Markdown") # <--- UPDATED
+        await query.edit_message_text(text, parse_mode="Markdown")
 
 async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with AsyncSessionLocal() as session:
@@ -94,7 +93,6 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("❌ You are not an approved driver yet.")
             return
 
-        # <--- UPDATED: Displays driver name, balance, phone, car model, and plate number
         text = (
             f"👤 **Driver Profile & Wallet Status**\n\n"
             f"📛 Name: {driver.name}\n"
@@ -103,7 +101,7 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
             f"🚙 Car Model: {driver.car_model}\n"
             f"🔢 License Plate: `{driver.license_plate}`"
         )
-        await update.message.reply_text(text, parse_mode="Markdown") # <--- UPDATED
+        await update.message.reply_text(text, parse_mode="Markdown")
 
 async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -111,9 +109,9 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     
     keyboard = [
         [InlineKeyboardButton("🚕 TAXI (Point-to-Point)", callback_data="TAXI")],
-        [InlineKeyboardButton("Sedan (20,000 MMK / hr)", callback_data="Sedan")],                 # <--- UPDATED
-        [InlineKeyboardButton("SUV (25,000 MMK / hr)", callback_data="SUV")],                     # <--- UPDATED
-        [InlineKeyboardButton("Alphard / VIP (30,000 MMK / hr)", callback_data="Alphard / VIP")]  # <--- UPDATED
+        [InlineKeyboardButton("Sedan (20,000 MMK / hr)", callback_data="Sedan")],
+        [InlineKeyboardButton("SUV (25,000 MMK / hr)", callback_data="SUV")],
+        [InlineKeyboardButton("Alphard / VIP (30,000 MMK / hr)", callback_data="Alphard / VIP")]
     ]
     await query.edit_message_text("🚘 Select Vehicle Type:", reply_markup=InlineKeyboardMarkup(keyboard))
     return VEHICLE
@@ -122,16 +120,40 @@ async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     context.user_data['vehicle'] = query.data
-    await query.edit_message_text(f"🚘 Vehicle: **{query.data}**\n\n📅 Enter Date (e.g., 26 Aug 2026):", parse_mode="Markdown")
+    await query.edit_message_text(f"🚘 Vehicle: **{query.data}**\n\n📅 Enter Date (e.g., YYYY-MM-DD or 26-08-2026):", parse_mode="Markdown") # <--- UPDATED
     return DATE
 
 async def date_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['date'] = update.message.text
-    await update.message.reply_text("🕐 Enter Pickup Time (e.g., 10:00 AM):")
+    raw_date = update.message.text.strip() # <--- UPDATED
+    formatted_date = raw_date # <--- UPDATED
+    
+    # Try parsing common date formats to standardize to YYYY-MM-DD
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d %B %Y"): # <--- UPDATED
+        try: # <--- UPDATED
+            parsed_d = datetime.strptime(raw_date, fmt) # <--- UPDATED
+            formatted_date = parsed_d.strftime("%Y-%m-%d") # <--- UPDATED
+            break # <--- UPDATED
+        except ValueError: # <--- UPDATED
+            continue # <--- UPDATED
+
+    context.user_data['date'] = formatted_date # <--- UPDATED
+    await update.message.reply_text("🕐 Enter Pickup Time (e.g., 10:00 AM or 14:30):") # <--- UPDATED
     return TIME
 
 async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['time'] = update.message.text
+    raw_time = update.message.text.strip() # <--- UPDATED
+    formatted_time = raw_time # <--- UPDATED
+    
+    # Try parsing common time formats to standardize to HH:MM AM/PM
+    for fmt in ("%I:%M %p", "%I:%M%p", "%H:%M"): # <--- UPDATED
+        try: # <--- UPDATED
+            parsed_t = datetime.strptime(raw_time, fmt) # <--- UPDATED
+            formatted_time = parsed_t.strftime("%I:%M %p") # <--- UPDATED
+            break # <--- UPDATED
+        except ValueError: # <--- UPDATED
+            continue # <--- UPDATED
+
+    context.user_data['time'] = formatted_time # <--- UPDATED
     vehicle = context.user_data.get('vehicle', 'Sedan')
     
     if vehicle == "TAXI":
@@ -142,7 +164,7 @@ async def time_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text("📍 Please click below to share your exact GPS Pickup Location or type your address:", reply_markup=location_keyboard)
         return LOCATION
 
-    rate = HOURLY_RATES.get(vehicle, 20000)   # <--- UPDATED default fallback rate
+    rate = HOURLY_RATES.get(vehicle, 20000)
     keyboard = [
         [InlineKeyboardButton(f"1 Hour ({1 * rate:,.0f} MMK)", callback_data="1")],
         [InlineKeyboardButton(f"2 Hours ({2 * rate:,.0f} MMK)", callback_data="2")],
@@ -220,7 +242,7 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
          
     context.user_data['customer_phone'] = phone 
     data = context.user_data 
-    booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}" 
+    booking_id = f"RNT-{datetime.now().strftime('%Y%m%d-%H%M%S')}" # <--- UPDATED
      
     vehicle = data['vehicle']
     if vehicle == 'TAXI':
@@ -330,18 +352,18 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
                 telegram_id=user.id,  
                 name=data['driver_name'],  
                 username=user.username,  
-                wallet_balance=1.0,  # <--- WELCOME BONUS (1 Point)
+                wallet_balance=1.0, 
                 is_approved=False,
                 phone=data['driver_phone'], 
-                car_model=data['driver_vehicle'],     # <--- ADDED
-                license_plate=plate_number           # <--- ADDED
+                car_model=data['driver_vehicle'], 
+                license_plate=plate_number 
             ) 
             session.add(driver) 
         else: 
             driver.name = data['driver_name'] 
             driver.phone = data['driver_phone']
-            driver.car_model = data['driver_vehicle']     # <--- ADDED
-            driver.license_plate = plate_number           # <--- ADDED
+            driver.car_model = data['driver_vehicle'] 
+            driver.license_plate = plate_number 
         await session.commit() 
          
     await update.message.reply_text("✅ Registration details submitted! You received **1 Welcome Point** 🎉. Please wait for admin approval.", parse_mode="Markdown")
@@ -387,7 +409,6 @@ async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['topup_points'] = pkg["points"] 
     context.user_data['topup_price'] = pkg["price"] 
 
-    # Added payment info with your phone number and wallets
     text = (
         f"💳 Send payment for **{pkg['points']} Points ({pkg['price']:,} MMK)**\n\n"
         f"📲 **Transfer to (KBZPay / AYAPay / WAVEPay):**\n"
@@ -424,7 +445,6 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.commit() 
         await query.edit_message_text(text=f"{query.message.text}\n\n✅ DRIVER APPROVED") 
         
-        # Make invite link for Driver Dispatch Group
         invite_link = None
         if DRIVER_GROUP_ID:
             try:
@@ -433,7 +453,6 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Failed to create invite link: {e}")
 
-        # Send link to driver
         if invite_link:
             await context.bot.send_message(
                 chat_id=d_id, 
