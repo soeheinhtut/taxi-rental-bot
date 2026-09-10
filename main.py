@@ -1,6 +1,6 @@
 import os
 import logging
-import calendar
+import calendar  # <--- UPDATED
 from datetime import datetime
 from fastapi import FastAPI, Request
 from telegram import (
@@ -47,7 +47,7 @@ TOPUP_PKG, TOPUP_RECEIPT = range(12, 14)
 app = FastAPI()
 telegram_app = None
 
-
+# <--- UPDATED: Function to build inline calendar
 def get_calendar_keyboard(year, month):
     keyboard = []
     keyboard.append([InlineKeyboardButton(f"{calendar.month_name[month]} {year}", callback_data="ignore")])
@@ -74,7 +74,7 @@ def get_calendar_keyboard(year, month):
     ])
     return InlineKeyboardMarkup(keyboard)
 
-
+# <--- UPDATED: Function to build time selection keyboard
 def get_time_keyboard():
     keyboard = []
     times = [
@@ -108,7 +108,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return ConversationHandler.END
 
-
 async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -131,7 +130,6 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         await query.edit_message_text(text, parse_mode="Markdown")
 
-
 async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with AsyncSessionLocal() as session:
         res = await session.execute(select(Driver).where(Driver.telegram_id == update.effective_user.id))
@@ -151,7 +149,6 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await update.message.reply_text(text, parse_mode="Markdown")
 
-
 async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -165,23 +162,22 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.edit_message_text("🚘 Select Vehicle Type:", reply_markup=InlineKeyboardMarkup(keyboard))
     return VEHICLE
 
-
 async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data['vehicle'] = query.data
     
-    now = datetime.now()
-    reply_markup = get_calendar_keyboard(now.year, now.month)
+    now = datetime.now() # <--- UPDATED
+    reply_markup = get_calendar_keyboard(now.year, now.month) # <--- UPDATED
     
     await query.edit_message_text(
-        f"🚘 Vehicle: **{query.data}**\n\n📅 Select Date:",
-        reply_markup=reply_markup,
+        f"🚘 Vehicle: **{query.data}**\n\n📅 Select Date:", # <--- UPDATED
+        reply_markup=reply_markup, # <--- UPDATED
         parse_mode="Markdown"
     )
     return DATE
 
-
+# <--- UPDATED: New callback logic for Date selection calendar
 async def date_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query
     await query.answer()
@@ -209,7 +205,7 @@ async def date_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         return TIME
 
-
+# <--- UPDATED: New callback logic for Time selection 
 async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -244,7 +240,6 @@ async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     )
     return HOURS
 
-
 async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -270,7 +265,6 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
     return LOCATION
 
-
 async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location
     if loc:
@@ -285,12 +279,10 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
     return PASSENGERS 
 
-
 async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['drop_location'] = update.message.text
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
-
 
 async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['passengers'] = update.message.text 
@@ -304,8 +296,7 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup=phone_keyboard 
     ) 
     return C_PHONE 
-
-
+ 
 async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
     phone = contact.phone_number if contact else update.message.text 
@@ -382,15 +373,13 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
             logger.error(f"Failed to send to DRIVER_GROUP_ID: {e}") 
              
     return ConversationHandler.END 
-
-
+ 
 async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
     await query.edit_message_text("📝 Please enter your **Full Name**:") 
     return D_NAME 
-
-
+ 
 async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['driver_name'] = update.message.text 
     phone_keyboard = ReplyKeyboardMarkup( 
@@ -399,21 +388,18 @@ async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
     ) 
     await update.message.reply_text("📞 Please enter or share your **Phone Contact Number**:", reply_markup=phone_keyboard) 
     return D_PHONE 
-
-
+ 
 async def driver_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
     context.user_data['driver_phone'] = contact.phone_number if contact else update.message.text 
     await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model**:", reply_markup=ReplyKeyboardRemove()) 
     return D_VEHICLE 
-
-
+ 
 async def driver_vehicle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['driver_vehicle'] = update.message.text 
     await update.message.reply_text("🔢 Please enter your **Car Plate Number**:") 
     return D_PLATE 
-
-
+ 
 async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     user = update.message.from_user 
     plate_number = update.message.text 
@@ -458,8 +444,7 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
             logger.error(f"Failed to send driver registration: {e}") 
              
     return ConversationHandler.END 
-
-
+ 
 async def topup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
@@ -477,8 +462,7 @@ async def topup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     ] 
     await query.edit_message_text("💳 **Select Top-Up Package:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)) 
     return TOPUP_PKG 
-
-
+ 
 async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
@@ -494,8 +478,7 @@ async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
     )
     await query.edit_message_text(text, parse_mode="Markdown")
     return TOPUP_RECEIPT 
-
-
+ 
 async def topup_receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     if not update.message.photo: 
         await update.message.reply_text("Please upload screenshot.") 
@@ -503,13 +486,13 @@ async def topup_receipt_received(update: Update, context: ContextTypes.DEFAULT_T
     file_id = update.message.photo[-1].file_id 
     user = update.message.from_user 
     points = context.user_data.get('topup_points', 0) 
+    price = context.user_data.get('topup_price', 0) 
     await update.message.reply_text("✅ Uploaded successfully! Pending approval.") 
     if ADMIN_GROUP_ID: 
         keyboard = [[InlineKeyboardButton(f"✅ Approve (+{points} Pts)", callback_data=f"tapp_{user.id}_{points}"), InlineKeyboardButton("❌ Reject", callback_data=f"trej_{user.id}")]] 
         await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=file_id, caption=f"Top-up request: {points} Pts", reply_markup=InlineKeyboardMarkup(keyboard)) 
     return ConversationHandler.END 
-
-
+ 
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
     await query.answer() 
@@ -554,8 +537,7 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         d_id = int(data.split("_")[1]) 
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ REJECTED") 
         await context.bot.send_message(chat_id=d_id, text="❌ Top-up rejected.") 
-
-
+ 
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
     driver_user = query.from_user 
@@ -586,22 +568,21 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
  
         customer_phone = getattr(booking, 'customer_phone', None) or 'N/A'
         driver_phone = getattr(driver, 'phone', None) or 'N/A'
+        hours_label = "Point-to-Point (TAXI)" if booking.vehicle == "TAXI" else f"{booking.hours} Hours" 
         fare_display = "Negotiate directly with customer" if booking.vehicle == "TAXI" else f"{booking.fare_mmk:,.0f} MMK"
          
         await query.edit_message_text(text=f"🔒 **JOB #{b_id} ACCEPTED**\nDriver: {driver.name}", parse_mode="Markdown") 
         await query.answer("✅ Job accepted!") 
  
-        # UPDATED: Button set to "🏎️ On The Way" after job acceptance
         await context.bot.send_message(
             chat_id=driver_user.id, 
             text=f"📋 **ACCEPTED TRIP (#{b_id})**\nVehicle: {booking.vehicle}\nLocation:\n{booking.location}\n📞 **Customer Phone:** `{customer_phone}`\nFare: **{fare_display}**", 
             parse_mode="Markdown", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏎️ On The Way", callback_data=f"ontheway_{b_id}")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]])
         ) 
  
         await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **DRIVER ASSIGNED!**\nName: {driver.name}\nPhone: `{driver_phone}`", parse_mode="Markdown") 
-
-
+ 
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
     await query.answer() 
@@ -611,106 +592,21 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         booking = (await session.execute(select(Booking).where(Booking.id == b_id))).scalar_one_or_none() 
         if not booking: 
             return 
-            
-        if action == "ontheway":
-            booking.status = "ON_THE_WAY"
-            await session.commit()
-            
-            await query.edit_message_text(
-                text=f"🏎️ **JOB #{b_id}**\nStatus: On The Way to Pickup",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]])
-            )
-            
-            # Send location request keyboard to driver
-            loc_keyboard = ReplyKeyboardMarkup(
-                [[KeyboardButton("📍 Share Live Location", request_location=True)]],
-                one_time_keyboard=True, resize_keyboard=True
-            )
-            await context.bot.send_message(
-                chat_id=query.from_user.id,
-                text="📍 Please tap the button below to share your **Live Location** so the customer can track you:",
-                reply_markup=loc_keyboard
-            )
-            
-            await context.bot.send_message(
-                chat_id=booking.customer_id, 
-                text=f"🏎️ **Driver ({booking.driver_name}) is on the way to your pickup location!**"
-            )
-
-        elif action == "arrived": 
+        if action == "arrived": 
             booking.status = "DRIVER_ARRIVED" 
             await session.commit() 
-            await query.edit_message_text(
-                text=f"📍 **JOB #{b_id}**\nDriver Arrived", 
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Start Trip", callback_data=f"starttrip_{b_id}")]])
-            ) 
-            await context.bot.send_message(chat_id=booking.customer_id, text="📍 Driver has arrived at your location.") 
-
+            await query.edit_message_text(text=f"📍 **JOB #{b_id}**\nDriver Arrived", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Start Trip", callback_data=f"starttrip_{b_id}")]])) 
+            await context.bot.send_message(chat_id=booking.customer_id, text="📍 Driver has arrived.") 
         elif action == "starttrip": 
             booking.status = "TRIP_STARTED" 
             await session.commit() 
-            await query.edit_message_text(
-                text=f"▶️ **JOB #{b_id}**\nTrip Started", 
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏁 End Trip", callback_data=f"endtrip_{b_id}")]])
-            ) 
-            await context.bot.send_message(chat_id=booking.customer_id, text="▶️ Your trip has started.") 
-
+            await query.edit_message_text(text=f"▶️ **JOB #{b_id}**\nTrip Started", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏁 End Trip", callback_data=f"endtrip_{b_id}")]])) 
+            await context.bot.send_message(chat_id=booking.customer_id, text="▶️ Trip started.") 
         elif action == "endtrip": 
             booking.status = "TRIP_COMPLETED" 
             await session.commit() 
             await query.edit_message_text(text=f"🏁 **JOB #{b_id}**\nCompleted") 
-            await context.bot.send_message(chat_id=booking.customer_id, text="🏁 Trip completed. Thank you for riding with us!") 
-
-
-# UPDATED: Handler to forward driver live location updates directly to customer
-async def driver_location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message or update.edited_message
-    if not msg or not msg.location:
-        return
-        
-    driver_user_id = msg.from_user.id
-    lat = msg.location.latitude
-    lng = msg.location.longitude
-
-    async with AsyncSessionLocal() as session:
-        stmt = select(Booking).where(
-            Booking.driver_id == driver_user_id,
-            Booking.status.in_(["ON_THE_WAY", "TRIP_STARTED"])
-        )
-        res = await session.execute(stmt)
-        booking = res.scalar_one_or_none()
-        
-        if not booking:
-            return
-
-        if hasattr(booking, 'driver_lat'):
-            booking.driver_lat = lat
-            booking.driver_lng = lng
-            await session.commit()
-
-        try:
-            msg_id = getattr(booking, 'live_map_msg_id', None)
-            if msg_id:
-                await context.bot.edit_message_live_location(
-                    chat_id=booking.customer_id,
-                    message_id=msg_id,
-                    latitude=lat,
-                    longitude=lng
-                )
-            else:
-                sent_msg = await context.bot.send_location(
-                    chat_id=booking.customer_id,
-                    latitude=lat,
-                    longitude=lng,
-                    live_period=1800
-                )
-                if hasattr(booking, 'live_map_msg_id'):
-                    booking.live_map_msg_id = sent_msg.message_id
-                    await session.commit()
-        except Exception as e:
-            logger.error(f"Error updating live location for booking {booking.id}: {e}")
-
+            await context.bot.send_message(chat_id=booking.customer_id, text="🏁 Trip completed.") 
 
 @app.on_event("startup") 
 async def startup_event(): 
@@ -722,8 +618,8 @@ async def startup_event():
         entry_points=[CommandHandler("start", start), CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")], 
         states={ 
             VEHICLE: [CallbackQueryHandler(vehicle_chosen)], 
-            DATE: [CallbackQueryHandler(date_chosen)],
-            TIME: [CallbackQueryHandler(time_chosen)],
+            DATE: [CallbackQueryHandler(date_chosen)], # <--- UPDATED (Uses calendar buttons now)
+            TIME: [CallbackQueryHandler(time_chosen)], # <--- UPDATED (Uses time buttons now)
             HOURS: [CallbackQueryHandler(hours_chosen)], 
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)], 
             DROP_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, drop_location_received)],
@@ -760,10 +656,7 @@ async def startup_event():
     telegram_app.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^driver_balance$")) 
     telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|tapp_|trej_)")) 
     telegram_app.add_handler(CallbackQueryHandler(accept_job, pattern="^accept_")) 
-    telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(ontheway_|arrived_|starttrip_|endtrip_)")) 
-    
-    # Location handler for active drivers sharing live location
-    telegram_app.add_handler(MessageHandler(filters.LOCATION, driver_location_handler))
+    telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)")) 
  
     await telegram_app.initialize() 
     if RUN_MODE == "webhook": 
