@@ -548,8 +548,8 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not driver or not driver.is_approved: 
             await query.answer("❌ You are not an approved driver!", show_alert=True) 
             return 
- 
-        booking = (await session.execute(select(Booking).where(Booking.id == b_id).with_for_update())).scalar_one_or_none() 
+        # Cast b_id to int for database query
+        booking = (await session.execute(select(Booking).where(Booking.id == int(b_id)).with_for_update())).scalar_one_or_none() # <-- Updated
         if not booking or booking.status != "AVAILABLE": 
             await query.answer("❌ Job no longer available!", show_alert=True) 
             return 
@@ -573,15 +573,17 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
          
         await query.edit_message_text(text=f"🔒 **JOB #{b_id} ACCEPTED**\nDriver: {driver.name}", parse_mode="Markdown") 
         await query.answer("✅ Job accepted!") 
- 
+
+        # Send message to driver with "On the Way" button
         await context.bot.send_message(
             chat_id=driver_user.id, 
-            text=f"📋 **ACCEPTED TRIP (#{b_id})**\nVehicle: {booking.vehicle}\nLocation:\n{booking.location}\n📞 **Customer Phone:** `{customer_phone}`\nFare: **{fare_display}**", 
+            text=f"📋 **ACCEPTED TRIP (#{b_id})**\nVehicle: {booking.vehicle}\nLocation:\n{booking.location}\n📞 **Customer Phone:** `{customer_phone}`\nFare: **{fare_display}**\n\nTap **On the Way** when you start driving to customer location.", 
             parse_mode="Markdown", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚗 On the Way", callback_data=f"ontheway_{b_id}")]]) # <-- Updated
         ) 
  
-        await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **DRIVER ASSIGNED!**\nName: {driver.name}\nPhone: `{driver_phone}`", parse_mode="Markdown") 
+        await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **DRIVER ASSIGNED!**\nName: {driver.name}\nPhone: `{driver_phone}`", parse_mode="Markdown")
+  
  
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
@@ -592,6 +594,34 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         booking = (await session.execute(select(Booking).where(Booking.id == b_id))).scalar_one_or_none() 
         if not booking: 
             return 
+        if action == "ontheway": # <-- Updated (Added 'On the Way' state)
+            booking.status = "DRIVER_ON_THE_WAY" # <-- Updated
+            await session.commit() # <-- Updated
+            
+            # Next button for driver is Arrived
+            await query.edit_message_text( # <-- Updated
+                text=f"🚗 **JOB #{b_id}**\nDriver is On The Way", # <-- Updated
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]]) # <-- Updated
+            ) # <-- Updated
+            
+            # Request driver to send GPS location via keyboard button
+            location_keyboard = ReplyKeyboardMarkup( # <-- Updated
+                [[KeyboardButton("📍 Share Live Location with Customer", request_location=True)]], # <-- Updated
+                one_time_keyboard=True, # <-- Updated
+                resize_keyboard=True # <-- Updated
+            ) # <-- Updated
+            
+            await context.bot.send_message( # <-- Updated
+                chat_id=query.message.chat_id, # <-- Updated
+                text="🚗 **You are On The Way!**\n\nPlease press the button below to send your live location to the customer:", # <-- Updated
+                reply_markup=location_keyboard # <-- Updated
+            ) # <-- Updated
+            
+            await context.bot.send_message( # <-- Updated
+                chat_id=booking.customer_id, # <-- Updated
+                text=f"🚗 Driver is on the way to pick you up! (Job #{b_id})" # <-- Updated
+            ) # <-- Updated
+            
         if action == "arrived": 
             booking.status = "DRIVER_ARRIVED" 
             await session.commit() 
@@ -607,6 +637,40 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await session.commit() 
             await query.edit_message_text(text=f"🏁 **JOB #{b_id}**\nCompleted") 
             await context.bot.send_message(chat_id=booking.customer_id, text="🏁 Trip completed.") 
+            
+async def handle_driver_location_submission(update: Update, context: ContextTypes.DEFAULT_TYPE): # <-- Updated (New handler function)
+    msg = update.message # <-- Updated
+    if not msg or not msg.location: # <-- Updated
+        return # <-- Updated
+
+    driver_id = msg.from_user.id # <-- Updated
+
+    async with AsyncSessionLocal() as session: # <-- Updated
+        # Find active job where driver is on the way or in progress
+        res = await session.execute( # <-- Updated
+            select(Booking).where( # <-- Updated
+                Booking.driver_id == driver_id, # <-- Updated
+                Booking.status.in_(["DRIVER_ON_THE_WAY", "DRIVER_ARRIVED", "TRIP_STARTED"]) # <-- Updated
+            ) # <-- Updated
+        ) # <-- Updated
+        booking = res.scalar_one_or_none() # <-- Updated
+
+        if booking: # <-- Updated
+            # Send live tracking map to customer (live for 1 hour = 3600 seconds)
+            sent_msg = await context.bot.send_location( # <-- Updated
+                chat_id=booking.customer_id, # <-- Updated
+                latitude=msg.location.latitude, # <-- Updated
+                longitude=msg.location.longitude, # <-- Updated
+                live_period=3600 # <-- Updated
+            ) # <-- Updated
+            
+            # Store customer message ID if you want to track dynamic updates
+            if hasattr(booking, 'customer_live_msg_id'): # <-- Updated
+                booking.customer_live_msg_id = sent_msg.message_id # <-- Updated
+                await session.commit() # <-- Updated
+
+            await msg.reply_text("📍 **Live location sent to customer!**", reply_markup=ReplyKeyboardRemove()) # <-- Updated
+            
 
 @app.on_event("startup") 
 async def startup_event(): 
@@ -656,7 +720,9 @@ async def startup_event():
     telegram_app.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^driver_balance$")) 
     telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|tapp_|trej_)")) 
     telegram_app.add_handler(CallbackQueryHandler(accept_job, pattern="^accept_")) 
-    telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(arrived_|starttrip_|endtrip_)")) 
+    telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(ontheway_|arrived_|starttrip_|endtrip_)")) # <-- Updated (Added ontheway_)
+    # Place location submission handler after conversations:
+    telegram_app.add_handler(MessageHandler(filters.LOCATION & ~filters.COMMAND, handle_driver_location_submission)) # <-- Updated
  
     await telegram_app.initialize() 
     if RUN_MODE == "webhook": 
