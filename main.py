@@ -548,8 +548,8 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not driver or not driver.is_approved: 
             await query.answer("❌ You are not an approved driver!", show_alert=True) 
             return 
-        # Cast b_id to int for database query
-        booking = (await session.execute(select(Booking).where(Booking.id == int(b_id)).with_for_update())).scalar_one_or_none() # <-- Updated
+        
+        booking = (await session.execute(select(Booking).where(Booking.id == b_id).with_for_update())).scalar_one_or_none()
         if not booking or booking.status != "AVAILABLE": 
             await query.answer("❌ Job no longer available!", show_alert=True) 
             return 
