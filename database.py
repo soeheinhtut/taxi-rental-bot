@@ -47,6 +47,14 @@ class Booking(Base):
     driver_name: Mapped[str] = mapped_column(String(100), nullable=True)
     customer_phone: Mapped[str] = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Coordinates and tracking details
+    pickup_lat: Mapped[float] = mapped_column(Float, nullable=True)
+    pickup_lng: Mapped[float] = mapped_column(Float, nullable=True)
+    driver_lat: Mapped[float] = mapped_column(Float, nullable=True)
+    driver_lng: Mapped[float] = mapped_column(Float, nullable=True)
+    live_map_msg_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class WalletTransaction(Base):
     __tablename__ = "wallet_transactions"
@@ -60,7 +68,16 @@ class WalletTransaction(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Schema updates for existing PostgreSQL instances
         await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(30);"))
+        await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS drop_location VARCHAR(255);"))
+        await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_lat DOUBLE PRECISION;"))
+        await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS pickup_lng DOUBLE PRECISION;"))
+        await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS driver_lat DOUBLE PRECISION;"))
+        await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS driver_lng DOUBLE PRECISION;"))
+        await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS live_map_msg_id BIGINT;"))
+        
         await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS phone VARCHAR(30);"))
-        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_model VARCHAR(100);"))     # <--- ADDED
-        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS license_plate VARCHAR(50);")) # <--- ADDED
+        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS car_model VARCHAR(100);"))
+        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS license_plate VARCHAR(50);"))
