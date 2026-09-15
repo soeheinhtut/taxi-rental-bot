@@ -281,22 +281,21 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
     return LOCATION
 
-
 async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location
     if loc:
         context.user_data['location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}" 
-        context.user_data['pickup_lat'] = loc.latitude  # <== Updated 15Sep26
-        context.user_data['pickup_lng'] = loc.longitude  # <== Updated 15Sep26
+        context.user_data['pickup_lat'] = loc.latitude  
+        context.user_data['pickup_lng'] = loc.longitude  
     else: 
         context.user_data['location'] = update.message.text 
          
-    if context.user_data.get('vehicle') in ["TAXI", "Kilo Car"]:  # <== Updated 15Sep26
-        drop_keyboard = ReplyKeyboardMarkup(  # <== Updated 15Sep26
-            [[KeyboardButton("📍 Share Drop-off GPS Location", request_location=True)]],  # <== Updated 15Sep26
-            one_time_keyboard=True, resize_keyboard=True  # <== Updated 15Sep26
-        )  # <== Updated 15Sep26
-        await update.message.reply_text("📍 Please share your **Drop-off GPS Location** or type your address:", reply_markup=drop_keyboard)  # <== Updated 15Sep26
+    if context.user_data.get('vehicle') in ["TAXI", "Kilo Car"]:  
+        # Instruct user to use map attachment instead of asking for current location # <== Updated 15Sep26
+        await update.message.reply_text( # <== Updated 15Sep26
+            "📍 Please click the 📎 (paperclip) icon, choose **Location**, select your **Drop-off point** on the map, and send it.", # <== Updated 15Sep26
+            reply_markup=ReplyKeyboardRemove() # <== Updated 15Sep26
+        ) # <== Updated 15Sep26
         return DROP_LOCATION
 
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
@@ -304,17 +303,19 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    loc = update.message.location  # <== Updated 15Sep26
-    if loc:  # <== Updated 15Sep26
-        context.user_data['drop_location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}"  # <== Updated 15Sep26
-        context.user_data['drop_lat'] = loc.latitude  # <== Updated 15Sep26
-        context.user_data['drop_lng'] = loc.longitude  # <== Updated 15Sep26
-    else:  # <== Updated 15Sep26
-        context.user_data['drop_location'] = update.message.text  # <== Updated 15Sep26
+    loc = update.message.location  
+    if loc:  
+        context.user_data['drop_location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}"  
+        context.user_data['drop_lat'] = loc.latitude  
+        context.user_data['drop_lng'] = loc.longitude  
+    else:  
+        # Disable text input temporarily  # <== Updated 15Sep26
+        # context.user_data['drop_location'] = update.message.text  # <== Updated 15Sep26
+        await update.message.reply_text("❌ Text input is disabled. Please use 📎 (paperclip) -> Location to choose on the map.") # <== Updated 15Sep26
+        return DROP_LOCATION # <== Updated 15Sep26
         
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
-
 
 async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['passengers'] = update.message.text 
