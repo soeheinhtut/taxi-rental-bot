@@ -1,6 +1,7 @@
 import os
 import logging
 import calendar
+import math # <== Updated 15Sep26
 from datetime import datetime
 from fastapi import FastAPI, Request
 from telegram import (
@@ -157,7 +158,7 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     keyboard = [
-        [InlineKeyboardButton("🚕 TAXI (Point-to-Point)", callback_data="TAXI")],
+        [InlineKeyboardButton("🚕 Kilo Car (Min 5km 7,500 MMK + 1,000 MMK/km)", callback_data="Kilo Car")], # <== Updated 15Sep26
         [InlineKeyboardButton("Sedan (20,000 MMK / hr)", callback_data="Sedan")],                 
         [InlineKeyboardButton("SUV (25,000 MMK / hr)", callback_data="SUV")],                     
         [InlineKeyboardButton("Alphard / VIP (30,000 MMK / hr)", callback_data="Alphard / VIP")]  
@@ -217,7 +218,7 @@ async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data['time'] = selected_time
     vehicle = context.user_data.get('vehicle', 'Sedan')
     
-    if vehicle == "TAXI":
+    if vehicle == "Kilo Car": # <== Updated 15Sep26
         location_keyboard = ReplyKeyboardMarkup(
             [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
             one_time_keyboard=True, resize_keyboard=True
@@ -275,19 +276,32 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     loc = update.message.location
     if loc:
         context.user_data['location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}" 
+        context.user_data['pickup_lat'] = loc.latitude # <== Updated 15Sep26
+        context.user_data['pickup_lng'] = loc.longitude # <== Updated 15Sep26
     else: 
         context.user_data['location'] = update.message.text 
          
-    if context.user_data.get('vehicle') == "TAXI":
-        await update.message.reply_text("📍 Please enter your **Drop-off Location** (type address or landmark):", reply_markup=ReplyKeyboardRemove())
-        return DROP_LOCATION
+    if context.user_data.get('vehicle') == "Kilo Car": # <== Updated 15Sep26
+        drop_keyboard = ReplyKeyboardMarkup( # <== Updated 15Sep26
+            [[KeyboardButton("📍 Share Drop-off GPS Location", request_location=True)]], # <== Updated 15Sep26
+            one_time_keyboard=True, resize_keyboard=True # <== Updated 15Sep26
+        ) # <== Updated 15Sep26
+        await update.message.reply_text("📍 Please share your **Drop-off Location** (tap button to share GPS location or type address/landmark):", reply_markup=drop_keyboard) # <== Updated 15Sep26
+        return DROP_LOCATION # <== Updated 15Sep26
 
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
     return PASSENGERS 
 
 
 async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data['drop_location'] = update.message.text
+    loc = update.message.location # <== Updated 15Sep26
+    if loc: # <== Updated 15Sep26
+        context.user_data['drop_location'] = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}" # <== Updated 15Sep26
+        context.user_data['drop_lat'] = loc.latitude # <== Updated 15Sep26
+        context.user_data['drop_lng'] = loc.longitude # <== Updated 15Sep26
+    else: # <== Updated 15Sep26
+        context.user_data['drop_location'] = update.message.text # <== Updated 15Sep26
+
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
 
@@ -315,13 +329,33 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
     booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}" 
      
     vehicle = data['vehicle']
-    if vehicle == 'TAXI':
+    if vehicle == 'Kilo Car': # <== Updated 15Sep26
         final_location = f"**Pickup:** {data['location']}\n**Drop-off:** {data.get('drop_location', 'N/A')}"
-        hours_label = "Point-to-Point (TAXI)"
+        hours_label = "Point-to-Point (Kilo Car)" # <== Updated 15Sep26
         points_required = 1.0  
-        fare_display = "Negotiate directly with Driver"
-        fare_db_value = 0.0
         hours_db_value = 0
+
+        # Calculate estimated distance and fare if GPS coords exist for both pickup & drop-off # <== Updated 15Sep26
+        p_lat = data.get('pickup_lat') # <== Updated 15Sep26
+        p_lng = data.get('pickup_lng') # <== Updated 15Sep26
+        d_lat = data.get('drop_lat') # <== Updated 15Sep26
+        d_lng = data.get('drop_lng') # <== Updated 15Sep26
+
+        if p_lat and p_lng and d_lat and d_lng: # <== Updated 15Sep26
+            R = 6371.0 # <== Updated 15Sep26
+            dlat = math.radians(d_lat - p_lat) # <== Updated 15Sep26
+            dlng = math.radians(d_lng - p_lng) # <== Updated 15Sep26
+            a = math.sin(dlat / 2)**2 + math.cos(math.radians(p_lat)) * math.cos(math.radians(d_lat)) * math.sin(dlng / 2)**2 # <== Updated 15Sep26
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)) # <== Updated 15Sep26
+            dist_km = R * c # <== Updated 15Sep26
+
+            extra_km = max(0, math.ceil(dist_km - 5)) # <== Updated 15Sep26
+            fare_mmk = 7500 + (extra_km * 1000) # <== Updated 15Sep26
+            fare_display = f"{fare_mmk:,.0f} MMK (~{dist_km:.1f} km)" # <== Updated 15Sep26
+            fare_db_value = float(fare_mmk) # <== Updated 15Sep26
+        else: # <== Updated 15Sep26
+            fare_display = "Min 5km (7,500 MMK) + 1,000 MMK / extra km" # <== Updated 15Sep26
+            fare_db_value = 7500.0 # <== Updated 15Sep26
     else:
         final_location = data['location']
         hours_label = f"{data['hours']} Hours"
@@ -572,7 +606,7 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Job no longer available!", show_alert=True) 
             return 
              
-        required_points = 1.0 if booking.vehicle == "TAXI" else float(booking.hours) 
+        required_points = 1.0 if booking.vehicle == "Kilo Car" else float(booking.hours) # <== Updated 15Sep26
         if driver.wallet_balance < required_points: 
             await query.answer(f"❌ Insufficient points. Required: {required_points:,.0f}", show_alert=True) 
             return 
@@ -586,12 +620,12 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
  
         customer_phone = getattr(booking, 'customer_phone', None) or 'N/A'
         driver_phone = getattr(driver, 'phone', None) or 'N/A'
-        fare_display = "Negotiate directly with customer" if booking.vehicle == "TAXI" else f"{booking.fare_mmk:,.0f} MMK"
+        fare_display = f"{booking.fare_mmk:,.0f} MMK" if booking.fare_mmk > 0 else "Min 5km (7,500 MMK) + 1,000 MMK/km" # <== Updated 15Sep26
          
         await query.edit_message_text(text=f"🔒 **JOB #{b_id} ACCEPTED**\nDriver: {driver.name}", parse_mode="Markdown") 
         await query.answer("✅ Job accepted!") 
  
-        # UPDATED: Button set to "🏎️ On The Way" after job acceptance
+        # Button set to "🏎️ On The Way" after job acceptance
         await context.bot.send_message(
             chat_id=driver_user.id, 
             text=f"📋 **ACCEPTED TRIP (#{b_id})**\nVehicle: {booking.vehicle}\nLocation:\n{booking.location}\n📞 **Customer Phone:** `{customer_phone}`\nFare: **{fare_display}**", 
@@ -663,7 +697,7 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=booking.customer_id, text="🏁 Trip completed. Thank you for riding with us!") 
 
 
-# UPDATED: Handler to forward driver live location updates directly to customer
+# Handler to forward driver live location updates directly to customer
 async def driver_location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.edited_message
     if not msg or not msg.location:
@@ -726,7 +760,7 @@ async def startup_event():
             TIME: [CallbackQueryHandler(time_chosen)],
             HOURS: [CallbackQueryHandler(hours_chosen)], 
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)], 
-            DROP_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, drop_location_received)],
+            DROP_LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, drop_location_received)], # <== Updated 15Sep26
             PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)], 
             C_PHONE: [MessageHandler((filters.TEXT | filters.CONTACT) & ~filters.COMMAND, customer_phone_received)] 
         }, 
