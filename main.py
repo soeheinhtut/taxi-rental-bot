@@ -330,7 +330,6 @@ async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE
     ) 
     return C_PHONE 
 
-
 async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
     phone = contact.phone_number if contact else update.message.text 
@@ -340,30 +339,36 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
     booking_id = f"RNT-{datetime.now().strftime('%Y%m%d')}-{int(datetime.now().timestamp()) % 10000}" 
      
     vehicle = data['vehicle']
-    if vehicle in ['TAXI', 'Kilo Car']:  # <== Updated 15Sep26
-        final_location = f"**Pickup:** {data['location']}\n**Drop-off:** {data.get('drop_location', 'N/A')}"
-        hours_label = "Point-to-Point (Kilo Car)"  # <== Updated 15Sep26
+    if vehicle in ['TAXI', 'Kilo Car']:
+        p_lat = data.get('pickup_lat')
+        p_lng = data.get('pickup_lng')
+        d_lat = data.get('drop_lat')
+        d_lng = data.get('drop_lng')
+        
+        # Create route direction link # <== Updated 15Sep26
+        direction_link = "N/A" # <== Updated 15Sep26
+        if p_lat and p_lng and d_lat and d_lng: # <== Updated 15Sep26
+            direction_link = f"https://www.google.com/maps/dir/?api=1&origin={p_lat},{p_lng}&destination={d_lat},{d_lng}" # <== Updated 15Sep26
+
+        final_location = f"**Pickup:** {data['location']}\n**Drop-off:** {data.get('drop_location', 'N/A')}\n**🗺️ Route Map:** {direction_link}" # <== Updated 15Sep26
+        
+        hours_label = "Point-to-Point (Kilo Car)"
         points_required = 1.0  
         hours_db_value = 0
         
-        # Calculate Kilo Car fare automatically  <== Updated 15Sep26
-        p_lat = data.get('pickup_lat')  # <== Updated 15Sep26
-        p_lng = data.get('pickup_lng')  # <== Updated 15Sep26
-        d_lat = data.get('drop_lat')  # <== Updated 15Sep26
-        d_lng = data.get('drop_lng')  # <== Updated 15Sep26
-        
-        if p_lat and p_lng and d_lat and d_lng:  # <== Updated 15Sep26
-            dist_km = calculate_distance(p_lat, p_lng, d_lat, d_lng)  # <== Updated 15Sep26
-            if dist_km <= 5.0:  # <== Updated 15Sep26
-                calculated_fare = 7500.0  # <== Updated 15Sep26
-            else:  # <== Updated 15Sep26
-                extra_km = math.ceil(dist_km - 5.0)  # <== Updated 15Sep26
-                calculated_fare = 7500.0 + (extra_km * 1000.0)  # <== Updated 15Sep26
-            fare_display = f"{calculated_fare:,.0f} MMK ({dist_km:.1f} km)"  # <== Updated 15Sep26
-            fare_db_value = calculated_fare  # <== Updated 15Sep26
-        else:  # <== Updated 15Sep26
-            fare_display = "7,500 MMK (Base 5km Rate)"  # <== Updated 15Sep26
-            fare_db_value = 7500.0  # <== Updated 15Sep26
+        # Calculate Kilo Car fare automatically
+        if p_lat and p_lng and d_lat and d_lng:
+            dist_km = calculate_distance(p_lat, p_lng, d_lat, d_lng)
+            if dist_km <= 5.0:
+                calculated_fare = 7500.0
+            else:
+                extra_km = math.ceil(dist_km - 5.0)
+                calculated_fare = 7500.0 + (extra_km * 1000.0)
+            fare_display = f"{calculated_fare:,.0f} MMK ({dist_km:.1f} km)"
+            fare_db_value = calculated_fare
+        else:
+            fare_display = "7,500 MMK (Base 5km Rate)"
+            fare_db_value = 7500.0
     else:
         final_location = data['location']
         hours_label = f"{data['hours']} Hours"
@@ -423,8 +428,7 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         except Exception as e: 
             logger.error(f"Failed to send to DRIVER_GROUP_ID: {e}") 
              
-    return ConversationHandler.END 
-
+    return ConversationHandler.END
 
 async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
