@@ -601,7 +601,6 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ REJECTED") 
         await context.bot.send_message(chat_id=d_id, text="❌ Top-up rejected.") 
 
-
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
     driver_user = query.from_user 
@@ -617,8 +616,21 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not booking or booking.status != "AVAILABLE": 
             await query.answer("❌ Job no longer available!", show_alert=True) 
             return 
+
+        # Check if driver already has a booking at the same date and time # <== Updated 15Sep26
+        conflict_stmt = select(Booking).where( # <== Updated 15Sep26
+            Booking.driver_id == driver.telegram_id, # <== Updated 15Sep26
+            Booking.date_str == booking.date_str, # <== Updated 15Sep26
+            Booking.time_str == booking.time_str, # <== Updated 15Sep26
+            Booking.status.in_(["ASSIGNED", "ON_THE_WAY", "DRIVER_ARRIVED", "TRIP_STARTED"]) # <== Updated 15Sep26
+        ) # <== Updated 15Sep26
+        has_conflict = (await session.execute(conflict_stmt)).scalar_one_or_none() # <== Updated 15Sep26
+
+        if has_conflict: # <== Updated 15Sep26
+            await query.answer(f"❌ Schedule conflict! You already have a job on {booking.date_str} at {booking.time_str}.", show_alert=True) # <== Updated 15Sep26
+            return # <== Updated 15Sep26
              
-        required_points = 1.0 if booking.vehicle in ["TAXI", "Kilo Car"] else float(booking.hours)  # <== Updated 15Sep26
+        required_points = 1.0 if booking.vehicle in ["TAXI", "Kilo Car"] else float(booking.hours) 
         if driver.wallet_balance < required_points: 
             await query.answer(f"❌ Insufficient points. Required: {required_points:,.0f}", show_alert=True) 
             return 
@@ -632,7 +644,7 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
  
         customer_phone = getattr(booking, 'customer_phone', None) or 'N/A'
         driver_phone = getattr(driver, 'phone', None) or 'N/A'
-        fare_display = f"{booking.fare_mmk:,.0f} MMK" if booking.fare_mmk > 0 else "Kilo Car Rate"  # <== Updated 15Sep26
+        fare_display = f"{booking.fare_mmk:,.0f} MMK" if booking.fare_mmk > 0 else "Kilo Car Rate"
          
         await query.edit_message_text(text=f"🔒 **JOB #{b_id} ACCEPTED**\nDriver: {driver.name}", parse_mode="Markdown") 
         await query.answer("✅ Job accepted!") 
@@ -644,8 +656,7 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏎️ On The Way", callback_data=f"ontheway_{b_id}")]])
         ) 
  
-        await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **DRIVER ASSIGNED!**\nName: {driver.name}\nPhone: `{driver_phone}`", parse_mode="Markdown") 
-
+        await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **DRIVER ASSIGNED!**\nName: {driver.name}\nPhone: `{driver_phone}`", parse_mode="Markdown")
 
 async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
