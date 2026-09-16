@@ -27,11 +27,11 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
 
 MMK_PER_POINT = 1000
 
-HOURLY_RATES = {
-    "Sedan": 20000,
-    "SUV": 25000,
-    "Alphard / VIP": 30000
-}
+PACKAGE_RATES = { # <== Updated 15Sep26
+    "Sedan": {3: 75000, 5: 100000, 8: 160000}, # <== Updated 15Sep26
+    "SUV": {3: 90000, 5: 125000, 8: 200000}, # <== Updated 15Sep26
+    "Alphard / VIP": {3: 105000, 5: 150000, 8: 240000} # <== Updated 15Sep26
+} # <== Updated 15Sep26
 
 TOPUP_PACKAGES = {
     "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},       
@@ -162,20 +162,22 @@ async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await update.message.reply_text(text, parse_mode="Markdown")
 
-
 async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     
     keyboard = [
-        [InlineKeyboardButton("🚕 Kilo Car (Min 5km 7,500 MMK)", callback_data="Kilo Car")],  # <== Updated 15Sep26
-        [InlineKeyboardButton("Sedan (20,000 MMK / hr)", callback_data="Sedan")],                 
-        [InlineKeyboardButton("SUV (25,000 MMK / hr)", callback_data="SUV")],                     
-        [InlineKeyboardButton("Alphard / VIP (30,000 MMK / hr)", callback_data="Alphard / VIP")]  
+        [InlineKeyboardButton("🚕 Kilo Car (Min 5km 8,500 MMK)", callback_data="Kilo Car")], # <== Updated 15Sep26
+        [InlineKeyboardButton("Sedan", callback_data="Sedan")], # <== Updated 15Sep26                 
+        [InlineKeyboardButton("SUV", callback_data="SUV")], # <== Updated 15Sep26                     
+        [InlineKeyboardButton("Alphard / VIP", callback_data="Alphard / VIP")] # <== Updated 15Sep26
     ]
-    await query.edit_message_text("🚘 Select Vehicle Type:", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(
+        "🚘 Select Vehicle Type:\n*(Note: Available Within Yangon City)*", # <== Updated 15Sep26
+        reply_markup=InlineKeyboardMarkup(keyboard), 
+        parse_mode="Markdown" # <== Updated 15Sep26
+    )
     return VEHICLE
-
 
 async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -220,7 +222,6 @@ async def date_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         return TIME
 
-
 async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -228,7 +229,7 @@ async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data['time'] = selected_time
     vehicle = context.user_data.get('vehicle', 'Sedan')
     
-    if vehicle in ["TAXI", "Kilo Car"]:  # <== Updated 15Sep26
+    if vehicle in ["TAXI", "Kilo Car"]:  
         location_keyboard = ReplyKeyboardMarkup(
             [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
             one_time_keyboard=True, resize_keyboard=True
@@ -240,21 +241,19 @@ async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
         return LOCATION
 
-    rate = HOURLY_RATES.get(vehicle, 20000)   
-    keyboard = [
-        [InlineKeyboardButton(f"1 Hour ({1 * rate:,.0f} MMK)", callback_data="1")],
-        [InlineKeyboardButton(f"2 Hours ({2 * rate:,.0f} MMK)", callback_data="2")],
-        [InlineKeyboardButton(f"3 Hours ({3 * rate:,.0f} MMK)", callback_data="3")],
-        [InlineKeyboardButton(f"6 Hours ({6 * rate:,.0f} MMK)", callback_data="6")],
-        [InlineKeyboardButton(f"1 Day / 10 Hours ({10 * rate:,.0f} MMK)", callback_data="10")]
-    ]
+    packages = PACKAGE_RATES.get(vehicle, {3: 75000, 5: 100000, 8: 160000}) # <== Updated 15Sep26
+    keyboard = [ # <== Updated 15Sep26
+        [InlineKeyboardButton(f"3 Hours ({packages[3]:,.0f} MMK)", callback_data="3")], # <== Updated 15Sep26
+        [InlineKeyboardButton(f"5 Hours ({packages[5]:,.0f} MMK)", callback_data="5")], # <== Updated 15Sep26
+        [InlineKeyboardButton(f"8 Hours ({packages[8]:,.0f} MMK)", callback_data="8")] # <== Updated 15Sep26
+    ] # <== Updated 15Sep26
+    
     await query.edit_message_text(
-        f"🕐 Time: **{selected_time}**\n\n⏱ Select Rental Package for **{vehicle}**:\n*(Rate: {rate:,.0f} MMK / hour)*",
+        f"🕐 Time: **{selected_time}**\n\n⏱ Select Rental Package for **{vehicle}**:\n*(Note: Available Within Yangon City)*", # <== Updated 15Sep26
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
     return HOURS
-
 
 async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -262,8 +261,8 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     hours = int(query.data)
     vehicle = context.user_data['vehicle']
-    rate = HOURLY_RATES[vehicle]
-    total_fare = hours * rate
+    
+    total_fare = PACKAGE_RATES[vehicle][hours] # <== Updated 15Sep26
     
     context.user_data['hours'] = hours
     context.user_data['fare'] = total_fare
@@ -360,15 +359,15 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         if p_lat and p_lng and d_lat and d_lng:
             dist_km = calculate_distance(p_lat, p_lng, d_lat, d_lng)
             if dist_km <= 5.0:
-                calculated_fare = 7500.0
+                calculated_fare = 8500.0 # <== Updated 15Sep26
             else:
                 extra_km = math.ceil(dist_km - 5.0)
-                calculated_fare = 7500.0 + (extra_km * 1000.0)
+                calculated_fare = 8500.0 + (extra_km * 1100.0) # <== Updated 15Sep26
             fare_display = f"{calculated_fare:,.0f} MMK ({dist_km:.1f} km)"
             fare_db_value = calculated_fare
         else:
-            fare_display = "7,500 MMK (Base 5km Rate)"
-            fare_db_value = 7500.0
+            fare_display = "8,500 MMK (Base 5km Rate)" # <== Updated 15Sep26
+            fare_db_value = 8500.0 # <== Updated 15Sep26
     else:
         final_location = data['location']
         hours_label = f"{data['hours']} Hours"
