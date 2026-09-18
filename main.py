@@ -82,21 +82,50 @@ def get_calendar_keyboard(year, month):
     ])
     return InlineKeyboardMarkup(keyboard)
 
-def get_time_keyboard():
-    keyboard = []
-    times = [
-        "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM",
-        "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM",
-        "03:00 PM", "04:00 PM", "05:00 PM", "06:00 PM",
-        "07:00 PM", "08:00 PM", "09:00 PM", "10:00 PM"
-    ]
-    for i in range(0, len(times), 2):
-        row = [
-            InlineKeyboardButton(times[i], callback_data=f"time_{times[i]}"),
-            InlineKeyboardButton(times[i+1], callback_data=f"time_{times[i+1]}")
-        ]
-        keyboard.append(row)
-    return InlineKeyboardMarkup(keyboard)
+def format_picker_time(hour24, minute):  # <== Updated 18Sep26
+    return datetime.strptime(f"{hour24:02d}:{minute:02d}", "%H:%M").strftime("%I:%M %p")  # <== Updated 18Sep26
+
+
+def normalize_picker_time(hour24, minute):  # <== Updated 18Sep26
+    total_minutes = hour24 * 60 + minute  # <== Updated 18Sep26
+    total_minutes = max(7 * 60, min(22 * 60, total_minutes))  # <== Updated 18Sep26
+    total_minutes = (total_minutes // 15) * 15  # <== Updated 18Sep26
+    return total_minutes // 60, total_minutes % 60  # <== Updated 18Sep26
+
+
+def get_time_picker_keyboard(hour24=7, minute=0):  # <== Updated 18Sep26
+    hour24, minute = normalize_picker_time(hour24, minute)  # <== Updated 18Sep26
+    current_time = format_picker_time(hour24, minute)  # <== Updated 18Sep26
+
+    prev_hour = hour24 - 1 if hour24 > 7 else 7  # <== Updated 18Sep26
+    next_hour = hour24 + 1 if hour24 < 22 else 22  # <== Updated 18Sep26
+
+    prev_min_hour, prev_minute = normalize_picker_time(hour24, minute - 15)  # <== Updated 18Sep26
+    next_min_hour, next_minute = normalize_picker_time(hour24, minute + 15)  # <== Updated 18Sep26
+
+    hour_up_label = "⬆️ Hour"  # <== Updated 18Sep26
+    hour_down_label = "⬇️ Hour"  # <== Updated 18Sep26
+    minute_up_label = "⬆️ 15 Min"  # <== Updated 18Sep26
+    minute_down_label = "⬇️ 15 Min"  # <== Updated 18Sep26
+
+    keyboard = [  # <== Updated 18Sep26
+        [  # <== Updated 18Sep26
+            InlineKeyboardButton(hour_up_label, callback_data=f"time_hour_{next_hour}"),  # <== Updated 18Sep26
+            InlineKeyboardButton(minute_up_label, callback_data=f"time_min_{next_min_hour}_{next_minute}")  # <== Updated 18Sep26
+        ],  # <== Updated 18Sep26
+        [  # <== Updated 18Sep26
+            InlineKeyboardButton(f"🕐 {current_time}", callback_data="time_noop"),  # <== Updated 18Sep26
+            InlineKeyboardButton("✅ Select", callback_data="time_confirm")  # <== Updated 18Sep26
+        ],  # <== Updated 18Sep26
+        [  # <== Updated 18Sep26
+            InlineKeyboardButton(hour_down_label, callback_data=f"time_hour_{prev_hour}"),  # <== Updated 18Sep26
+            InlineKeyboardButton(minute_down_label, callback_data=f"time_min_{prev_min_hour}_{prev_minute}")  # <== Updated 18Sep26
+        ],  # <== Updated 18Sep26
+        [  # <== Updated 18Sep26
+            InlineKeyboardButton("ℹ️ 07:00 AM – 10:00 PM • 15-minute steps", callback_data="time_noop")  # <== Updated 18Sep26
+        ]  # <== Updated 18Sep26
+    ]  # <== Updated 18Sep26
+    return InlineKeyboardMarkup(keyboard)  # <== Updated 18Sep26
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
@@ -206,46 +235,81 @@ async def date_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         selected_date = f"{year}-{int(month):02d}-{int(day):02d}"
         context.user_data['date'] = selected_date
 
-        reply_markup = get_time_keyboard()
+        context.user_data['time_hour'] = 7  # <== Updated 18Sep26
+        context.user_data['time_minute'] = 0  # <== Updated 18Sep26
+        reply_markup = get_time_picker_keyboard(7, 0)  # <== Updated 18Sep26
         await query.edit_message_text(
-            f"📅 Date: **{selected_date}**\n\n🕐 Select Pickup Time:", 
-            reply_markup=reply_markup, 
-            parse_mode="Markdown"
+            f"📅 Date: **{selected_date}**\n\n🕐 **Select Pickup Time**\n\nUse the ⬆️ / ⬇️ buttons to scroll the hour and 15-minute steps:",  # <== Updated 18Sep26
+            reply_markup=reply_markup,  # <== Updated 18Sep26
+            parse_mode="Markdown"  # <== Updated 18Sep26
         )
         return TIME
 
-async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    selected_time = query.data.split("_")[1]
-    context.user_data['time'] = selected_time
-    vehicle = context.user_data.get('vehicle', 'Sedan')
-    
-    if vehicle in ["TAXI", "Kilo Car"]:  
-        location_keyboard = ReplyKeyboardMarkup(
-            [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
-            one_time_keyboard=True, resize_keyboard=True
-        )
+async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:  # <== Updated 18Sep26
+    query = update.callback_query  # <== Updated 18Sep26
+    data = query.data  # <== Updated 18Sep26
+
+    hour24 = int(context.user_data.get('time_hour', 7))  # <== Updated 18Sep26
+    minute = int(context.user_data.get('time_minute', 0))  # <== Updated 18Sep26
+
+    if data == "time_noop":  # <== Updated 18Sep26
+        await query.answer()  # <== Updated 18Sep26
+        return TIME  # <== Updated 18Sep26
+
+    if data.startswith("time_hour_"):  # <== Updated 18Sep26
+        await query.answer()  # <== Updated 18Sep26
+        hour24 = int(data.split("_")[2])  # <== Updated 18Sep26
+        hour24, minute = normalize_picker_time(hour24, minute)  # <== Updated 18Sep26
+        context.user_data['time_hour'] = hour24  # <== Updated 18Sep26
+        context.user_data['time_minute'] = minute  # <== Updated 18Sep26
+        await query.edit_message_reply_markup(reply_markup=get_time_picker_keyboard(hour24, minute))  # <== Updated 18Sep26
+        return TIME  # <== Updated 18Sep26
+
+    if data.startswith("time_min_"):  # <== Updated 18Sep26
+        await query.answer()  # <== Updated 18Sep26
+        _, _, new_hour, new_minute = data.split("_")  # <== Updated 18Sep26
+        hour24 = int(new_hour)  # <== Updated 18Sep26
+        minute = int(new_minute)  # <== Updated 18Sep26
+        hour24, minute = normalize_picker_time(hour24, minute)  # <== Updated 18Sep26
+        context.user_data['time_hour'] = hour24  # <== Updated 18Sep26
+        context.user_data['time_minute'] = minute  # <== Updated 18Sep26
+        await query.edit_message_reply_markup(reply_markup=get_time_picker_keyboard(hour24, minute))  # <== Updated 18Sep26
+        return TIME  # <== Updated 18Sep26
+
+    if data == "time_confirm":  # <== Updated 18Sep26
+        await query.answer("✅ Time selected")  # <== Updated 18Sep26
+        selected_time = format_picker_time(hour24, minute)  # <== Updated 18Sep26
+        context.user_data['time'] = selected_time  # <== Updated 18Sep26
+        vehicle = context.user_data.get('vehicle', 'Sedan')  # <== Updated 18Sep26
+
+        if vehicle in ["TAXI", "Kilo Car"]:  # <== Updated 18Sep26
+            location_keyboard = ReplyKeyboardMarkup(
+                [[KeyboardButton("📍 Share GPS Location", request_location=True)]],
+                one_time_keyboard=True, resize_keyboard=True
+            )
+            await query.edit_message_text(
+                f"🕐 Time: **{selected_time}**\n\n📍 Please share your exact GPS Pickup Location or type your address:",  # <== Updated 18Sep26
+                parse_mode="Markdown"
+            )
+            await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
+            return LOCATION
+
+        packages = PACKAGE_RATES.get(vehicle, {3: 75000, 5: 100000, 8: 160000})  # <== Updated 18Sep26
+        keyboard = [
+            [InlineKeyboardButton(f"3 Hours ({packages[3]:,.0f} MMK)", callback_data="3")],
+            [InlineKeyboardButton(f"5 Hours ({packages[5]:,.0f} MMK)", callback_data="5")],
+            [InlineKeyboardButton(f"8 Hours ({packages[8]:,.0f} MMK)", callback_data="8")]
+        ]
+
         await query.edit_message_text(
-            f"🕐 Time: **{selected_time}**\n\n📍 Please share your exact GPS Pickup Location or type your address:", 
+            f"🕐 Time: **{selected_time}**\n\n⏱ Select Rental Package for **{vehicle}**:\n*(Note: Available Within Yangon City)*",  # <== Updated 18Sep26
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
-        await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
-        return LOCATION
+        return HOURS
 
-    packages = PACKAGE_RATES.get(vehicle, {3: 75000, 5: 100000, 8: 160000}) 
-    keyboard = [ 
-        [InlineKeyboardButton(f"3 Hours ({packages[3]:,.0f} MMK)", callback_data="3")], 
-        [InlineKeyboardButton(f"5 Hours ({packages[5]:,.0f} MMK)", callback_data="5")], 
-        [InlineKeyboardButton(f"8 Hours ({packages[8]:,.0f} MMK)", callback_data="8")] 
-    ] 
-    
-    await query.edit_message_text(
-        f"🕐 Time: **{selected_time}**\n\n⏱ Select Rental Package for **{vehicle}**:\n*(Note: Available Within Yangon City)*", 
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
-    )
-    return HOURS
+    await query.answer()  # <== Updated 18Sep26
+    return TIME  # <== Updated 18Sep26
 
 async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
