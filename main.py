@@ -1,7 +1,7 @@
 import os
 import logging
 import calendar
-import math  # <== Updated 15Sep26
+import math
 from datetime import datetime
 from fastapi import FastAPI, Request
 from telegram import (
@@ -27,11 +27,11 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "secret")
 
 MMK_PER_POINT = 1000
 
-PACKAGE_RATES = { # <== Updated 15Sep26
-    "Sedan": {3: 75000, 5: 100000, 8: 160000}, # <== Updated 15Sep26
-    "SUV": {3: 90000, 5: 125000, 8: 200000}, # <== Updated 15Sep26
-    "Alphard / VIP": {3: 105000, 5: 150000, 8: 240000} # <== Updated 15Sep26
-} # <== Updated 15Sep26
+PACKAGE_RATES = { 
+    "Sedan": {3: 75000, 5: 100000, 8: 160000}, 
+    "SUV": {3: 90000, 5: 125000, 8: 200000}, 
+    "Alphard / VIP": {3: 105000, 5: 150000, 8: 240000} 
+} 
 
 TOPUP_PACKAGES = {
     "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},       
@@ -48,16 +48,13 @@ TOPUP_PKG, TOPUP_RECEIPT = range(12, 14)
 app = FastAPI()
 telegram_app = None
 
-
-# Helper function to calculate distance between two GPS points (Haversine formula)  <== Updated 15Sep26
-def calculate_distance(lat1, lon1, lat2, lon2):  # <== Updated 15Sep26
-    R = 6371.0  # Earth radius in km  <== Updated 15Sep26
-    dlat = math.radians(lat2 - lat1)  # <== Updated 15Sep26
-    dlon = math.radians(lon2 - lon1)  # <== Updated 15Sep26
-    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2  # <== Updated 15Sep26
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))  # <== Updated 15Sep26
-    return R * c  # <== Updated 15Sep26
-
+def calculate_distance(lat1, lon1, lat2, lon2):  
+    R = 6371.0  
+    dlat = math.radians(lat2 - lat1)  
+    dlon = math.radians(lon2 - lon1)  
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2  
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))  
+    return R * c  
 
 def get_calendar_keyboard(year, month):
     keyboard = []
@@ -85,7 +82,6 @@ def get_calendar_keyboard(year, month):
     ])
     return InlineKeyboardMarkup(keyboard)
 
-
 def get_time_keyboard():
     keyboard = []
     times = [
@@ -102,7 +98,6 @@ def get_time_keyboard():
         keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
         return ConversationHandler.END
@@ -118,7 +113,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
-
 
 async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -141,7 +135,6 @@ async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_T
             f"🔢 License Plate: `{driver.license_plate}`"
         )
         await query.edit_message_text(text, parse_mode="Markdown")
-
 
 async def check_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with AsyncSessionLocal() as session:
@@ -167,15 +160,15 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     
     keyboard = [
-        [InlineKeyboardButton("🚕 Kilo Car (Min 5km 8,500 MMK)", callback_data="Kilo Car")], # <== Updated 15Sep26
-        [InlineKeyboardButton("Sedan", callback_data="Sedan")], # <== Updated 15Sep26                 
-        [InlineKeyboardButton("SUV", callback_data="SUV")], # <== Updated 15Sep26                     
-        [InlineKeyboardButton("Alphard / VIP", callback_data="Alphard / VIP")] # <== Updated 15Sep26
+        [InlineKeyboardButton("🚕 Kilo Car (Min 5km 8,500 MMK)", callback_data="Kilo Car")], 
+        [InlineKeyboardButton("Sedan", callback_data="Sedan")],                  
+        [InlineKeyboardButton("SUV", callback_data="SUV")],                      
+        [InlineKeyboardButton("Alphard / VIP", callback_data="Alphard / VIP")] 
     ]
     await query.edit_message_text(
-        "🚘 Select Vehicle Type:\n*(Note: Available Within Yangon City)*", # <== Updated 15Sep26
+        "🚘 Select Vehicle Type:\n*(Note: Available Within Yangon City)*", 
         reply_markup=InlineKeyboardMarkup(keyboard), 
-        parse_mode="Markdown" # <== Updated 15Sep26
+        parse_mode="Markdown" 
     )
     return VEHICLE
 
@@ -193,7 +186,6 @@ async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="Markdown"
     )
     return DATE
-
 
 async def date_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query
@@ -241,15 +233,15 @@ async def time_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await query.message.reply_text("Click button to send GPS location:", reply_markup=location_keyboard)
         return LOCATION
 
-    packages = PACKAGE_RATES.get(vehicle, {3: 75000, 5: 100000, 8: 160000}) # <== Updated 15Sep26
-    keyboard = [ # <== Updated 15Sep26
-        [InlineKeyboardButton(f"3 Hours ({packages[3]:,.0f} MMK)", callback_data="3")], # <== Updated 15Sep26
-        [InlineKeyboardButton(f"5 Hours ({packages[5]:,.0f} MMK)", callback_data="5")], # <== Updated 15Sep26
-        [InlineKeyboardButton(f"8 Hours ({packages[8]:,.0f} MMK)", callback_data="8")] # <== Updated 15Sep26
-    ] # <== Updated 15Sep26
+    packages = PACKAGE_RATES.get(vehicle, {3: 75000, 5: 100000, 8: 160000}) 
+    keyboard = [ 
+        [InlineKeyboardButton(f"3 Hours ({packages[3]:,.0f} MMK)", callback_data="3")], 
+        [InlineKeyboardButton(f"5 Hours ({packages[5]:,.0f} MMK)", callback_data="5")], 
+        [InlineKeyboardButton(f"8 Hours ({packages[8]:,.0f} MMK)", callback_data="8")] 
+    ] 
     
     await query.edit_message_text(
-        f"🕐 Time: **{selected_time}**\n\n⏱ Select Rental Package for **{vehicle}**:\n*(Note: Available Within Yangon City)*", # <== Updated 15Sep26
+        f"🕐 Time: **{selected_time}**\n\n⏱ Select Rental Package for **{vehicle}**:\n*(Note: Available Within Yangon City)*", 
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
@@ -262,7 +254,7 @@ async def hours_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     hours = int(query.data)
     vehicle = context.user_data['vehicle']
     
-    total_fare = PACKAGE_RATES[vehicle][hours] # <== Updated 15Sep26
+    total_fare = PACKAGE_RATES[vehicle][hours] 
     
     context.user_data['hours'] = hours
     context.user_data['fare'] = total_fare
@@ -290,16 +282,14 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data['location'] = update.message.text 
          
     if context.user_data.get('vehicle') in ["TAXI", "Kilo Car"]:  
-        # Instruct user to use map attachment instead of asking for current location # <== Updated 15Sep26
-        await update.message.reply_text( # <== Updated 15Sep26
-            "📍 Please click the 📎 (paperclip) icon, choose **Location**, select your **Drop-off point** on the map, and send it.", # <== Updated 15Sep26
-            reply_markup=ReplyKeyboardRemove() # <== Updated 15Sep26
-        ) # <== Updated 15Sep26
+        await update.message.reply_text( 
+            "📍 Please click the 📎 (paperclip) icon, choose **Location**, select your **Drop-off point** on the map, and send it.", 
+            reply_markup=ReplyKeyboardRemove() 
+        ) 
         return DROP_LOCATION
 
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove()) 
     return PASSENGERS 
-
 
 async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     loc = update.message.location  
@@ -308,10 +298,8 @@ async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data['drop_lat'] = loc.latitude  
         context.user_data['drop_lng'] = loc.longitude  
     else:  
-        # Disable text input temporarily  # <== Updated 15Sep26
-        # context.user_data['drop_location'] = update.message.text  # <== Updated 15Sep26
-        await update.message.reply_text("❌ Text input is disabled. Please use 📎 (paperclip) -> Location to choose on the map.") # <== Updated 15Sep26
-        return DROP_LOCATION # <== Updated 15Sep26
+        await update.message.reply_text("❌ Text input is disabled. Please use 📎 (paperclip) -> Location to choose on the map.") 
+        return DROP_LOCATION 
         
     await update.message.reply_text("👥 How many passengers will be riding?", reply_markup=ReplyKeyboardRemove())
     return PASSENGERS
@@ -344,30 +332,28 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         d_lat = data.get('drop_lat')
         d_lng = data.get('drop_lng')
         
-        # Create route direction link # <== Updated 15Sep26
-        direction_link = "N/A" # <== Updated 15Sep26
-        if p_lat and p_lng and d_lat and d_lng: # <== Updated 15Sep26
-            direction_link = f"https://www.google.com/maps/dir/?api=1&origin={p_lat},{p_lng}&destination={d_lat},{d_lng}" # <== Updated 15Sep26
+        direction_link = "N/A" 
+        if p_lat and p_lng and d_lat and d_lng: 
+            direction_link = f"https://www.google.com/maps/dir/?api=1&origin={p_lat},{p_lng}&destination={d_lat},{d_lng}" 
 
-        final_location = f"**Pickup:** {data['location']}\n**Drop-off:** {data.get('drop_location', 'N/A')}\n**🗺️ Route Map:** {direction_link}" # <== Updated 15Sep26
+        final_location = f"**Pickup:** {data['location']}\n**Drop-off:** {data.get('drop_location', 'N/A')}\n**🗺️ Route Map:** {direction_link}" 
         
         hours_label = "Point-to-Point (Kilo Car)"
         points_required = 1.0  
         hours_db_value = 0
         
-        # Calculate Kilo Car fare automatically
         if p_lat and p_lng and d_lat and d_lng:
             dist_km = calculate_distance(p_lat, p_lng, d_lat, d_lng)
             if dist_km <= 5.0:
-                calculated_fare = 8500.0 # <== Updated 15Sep26
+                calculated_fare = 8500.0 
             else:
                 extra_km = math.ceil(dist_km - 5.0)
-                calculated_fare = 8500.0 + (extra_km * 1100.0) # <== Updated 15Sep26
+                calculated_fare = 8500.0 + (extra_km * 1100.0) 
             fare_display = f"{calculated_fare:,.0f} MMK ({dist_km:.1f} km)"
             fare_db_value = calculated_fare
         else:
-            fare_display = "8,500 MMK (Base 5km Rate)" # <== Updated 15Sep26
-            fare_db_value = 8500.0 # <== Updated 15Sep26
+            fare_display = "8,500 MMK (Base 5km Rate)" 
+            fare_db_value = 8500.0 
     else:
         final_location = data['location']
         hours_label = f"{data['hours']} Hours"
@@ -389,7 +375,13 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         f"💰 **Total Fare: {fare_display}**" 
     ) 
      
-    await update.message.reply_text(summary, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove(), disable_web_page_preview=True) 
+    cancel_kb = [[InlineKeyboardButton("❌ Cancel Booking", callback_data=f"ccancel_{booking_id}")]] # <== Updated 18Sep26
+    await update.message.reply_text(
+        summary, 
+        parse_mode="Markdown", 
+        reply_markup=InlineKeyboardMarkup(cancel_kb), # <== Updated 18Sep26
+        disable_web_page_preview=True
+    ) 
      
     async with AsyncSessionLocal() as session: 
         booking = Booking( 
@@ -429,12 +421,40 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
              
     return ConversationHandler.END
 
+# <== Updated 18Sep26: Customer Cancel Function Added Below
+async def customer_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    b_id = query.data.split("_")[1]
+    
+    async with AsyncSessionLocal() as session:
+        booking = (await session.execute(select(Booking).where(Booking.id == b_id))).scalar_one_or_none()
+        if not booking or booking.status in ["CANCELLED", "TRIP_COMPLETED"]:
+            await query.edit_message_text(f"{query.message.text}\n\n❌ Cannot cancel this booking.")
+            return
+
+        if booking.driver_id:
+            driver = (await session.execute(select(Driver).where(Driver.telegram_id == booking.driver_id))).scalar_one_or_none()
+            if driver:
+                points_refund = 1.0 if booking.vehicle in ["TAXI", "Kilo Car"] else float(booking.hours)
+                driver.wallet_balance += points_refund
+                session.add(WalletTransaction(driver_telegram_id=driver.telegram_id, amount=points_refund, type="REFUND", booking_id=booking.id))
+                
+                await context.bot.send_message(
+                    chat_id=driver.telegram_id,
+                    text=f"⚠️ Customer cancelled Job #{b_id}. Your {points_refund:,.0f} points have been automatically refunded."
+                )
+
+        booking.status = "CANCELLED"
+        await session.commit()
+        await query.edit_message_text(f"{query.message.text}\n\n🚫 **BOOKING CANCELLED**")
+# <== Updated 18Sep26
+
 async def driver_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
     await query.edit_message_text("📝 Please enter your **Full Name**:") 
     return D_NAME 
-
 
 async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['driver_name'] = update.message.text 
@@ -445,19 +465,16 @@ async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("📞 Please enter or share your **Phone Contact Number**:", reply_markup=phone_keyboard) 
     return D_PHONE 
 
-
 async def driver_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
     context.user_data['driver_phone'] = contact.phone_number if contact else update.message.text 
     await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model**:", reply_markup=ReplyKeyboardRemove()) 
     return D_VEHICLE 
 
-
 async def driver_vehicle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     context.user_data['driver_vehicle'] = update.message.text 
     await update.message.reply_text("🔢 Please enter your **Car Plate Number**:") 
     return D_PLATE 
-
 
 async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     user = update.message.from_user 
@@ -504,7 +521,6 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
              
     return ConversationHandler.END 
 
-
 async def topup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
@@ -523,7 +539,6 @@ async def topup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await query.edit_message_text("💳 **Select Top-Up Package:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)) 
     return TOPUP_PKG 
 
-
 async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     query = update.callback_query 
     await query.answer() 
@@ -540,7 +555,6 @@ async def topup_package_chosen(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.edit_message_text(text, parse_mode="Markdown")
     return TOPUP_RECEIPT 
 
-
 async def topup_receipt_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     if not update.message.photo: 
         await update.message.reply_text("Please upload screenshot.") 
@@ -553,7 +567,6 @@ async def topup_receipt_received(update: Update, context: ContextTypes.DEFAULT_T
         keyboard = [[InlineKeyboardButton(f"✅ Approve (+{points} Pts)", callback_data=f"tapp_{user.id}_{points}"), InlineKeyboardButton("❌ Reject", callback_data=f"trej_{user.id}")]] 
         await context.bot.send_photo(chat_id=ADMIN_GROUP_ID, photo=file_id, caption=f"Top-up request: {points} Pts", reply_markup=InlineKeyboardMarkup(keyboard)) 
     return ConversationHandler.END 
-
 
 async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
@@ -595,10 +608,64 @@ async def admin_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await session.commit() 
         await query.edit_message_caption(caption=query.message.caption + "\n\n✅ APPROVED") 
         await context.bot.send_message(chat_id=d_id, text=f"✅ Top-up Approved (+{pts:,.0f} Pts)!") 
+        
     elif data.startswith("trej_"): 
         d_id = int(data.split("_")[1]) 
         await query.edit_message_caption(caption=query.message.caption + "\n\n❌ REJECTED") 
         await context.bot.send_message(chat_id=d_id, text="❌ Top-up rejected.") 
+
+    # <== Updated 18Sep26: Admin cancel approval added below
+    elif data.startswith("dcancelapp_"):
+        parts = data.split("_")
+        b_id = parts[1]
+        d_id = int(parts[2])
+        
+        async with AsyncSessionLocal() as session:
+            booking = (await session.execute(select(Booking).where(Booking.id == b_id))).scalar_one_or_none()
+            if booking and booking.status not in ["CANCELLED", "TRIP_COMPLETED"]:
+                driver = (await session.execute(select(Driver).where(Driver.telegram_id == d_id))).scalar_one_or_none()
+                if driver:
+                    points_refund = 1.0 if booking.vehicle in ["TAXI", "Kilo Car"] else float(booking.hours)
+                    driver.wallet_balance += points_refund
+                    session.add(WalletTransaction(driver_telegram_id=d_id, amount=points_refund, type="REFUND", booking_id=booking.id))
+                
+                booking.status = "AVAILABLE" 
+                booking.driver_id = None
+                booking.driver_name = None
+                await session.commit()
+                
+                await context.bot.send_message(chat_id=d_id, text=f"✅ Admin approved your cancellation for Job #{b_id}. Points refunded.")
+                await context.bot.send_message(chat_id=booking.customer_id, text=f"⚠️ Your driver had to cancel Job #{b_id}. We are finding a new driver.")
+        
+        await query.edit_message_text(f"{query.message.text}\n\n✅ Approved and Refunded. Job is Available again.")
+    # <== Updated 18Sep26
+
+    # <== Updated 18Sep26: Admin cancel rejection added below
+    elif data.startswith("dcancelrej_"):
+        parts = data.split("_")
+        b_id = parts[1]
+        d_id = int(parts[2])
+        await context.bot.send_message(chat_id=d_id, text=f"❌ Admin rejected your cancellation for Job #{b_id}. Please complete the trip.")
+        await query.edit_message_text(f"{query.message.text}\n\n❌ Rejected.")
+    # <== Updated 18Sep26
+
+# <== Updated 18Sep26: Driver cancel request function added below
+async def driver_cancel_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    b_id = query.data.split("_")[1]
+    driver_user = query.from_user
+
+    if ADMIN_GROUP_ID:
+        text = f"⚠️ **DRIVER CANCELLATION REQUEST**\n\nDriver: {driver_user.full_name}\nJob ID: `{b_id}`\n\nPlease approve or reject."
+        kb = [
+            [InlineKeyboardButton("✅ Approve & Refund", callback_data=f"dcancelapp_{b_id}_{driver_user.id}")],
+            [InlineKeyboardButton("❌ Reject", callback_data=f"dcancelrej_{b_id}_{driver_user.id}")]
+        ]
+        await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+        
+        await query.edit_message_text(f"{query.message.text}\n\n⏳ Cancellation requested. Waiting for admin approval.")
+# <== Updated 18Sep26
 
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE): 
     query = update.callback_query 
@@ -616,18 +683,17 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ Job no longer available!", show_alert=True) 
             return 
 
-        # Check if driver already has a booking at the same date and time # <== Updated 15Sep26
-        conflict_stmt = select(Booking).where( # <== Updated 15Sep26
-            Booking.driver_id == driver.telegram_id, # <== Updated 15Sep26
-            Booking.date_str == booking.date_str, # <== Updated 15Sep26
-            Booking.time_str == booking.time_str, # <== Updated 15Sep26
-            Booking.status.in_(["ASSIGNED", "ON_THE_WAY", "DRIVER_ARRIVED", "TRIP_STARTED"]) # <== Updated 15Sep26
-        ) # <== Updated 15Sep26
-        has_conflict = (await session.execute(conflict_stmt)).scalar_one_or_none() # <== Updated 15Sep26
+        conflict_stmt = select(Booking).where( 
+            Booking.driver_id == driver.telegram_id, 
+            Booking.date_str == booking.date_str, 
+            Booking.time_str == booking.time_str, 
+            Booking.status.in_(["ASSIGNED", "ON_THE_WAY", "DRIVER_ARRIVED", "TRIP_STARTED"]) 
+        ) 
+        has_conflict = (await session.execute(conflict_stmt)).scalar_one_or_none() 
 
-        if has_conflict: # <== Updated 15Sep26
-            await query.answer(f"❌ Schedule conflict! You already have a job on {booking.date_str} at {booking.time_str}.", show_alert=True) # <== Updated 15Sep26
-            return # <== Updated 15Sep26
+        if has_conflict: 
+            await query.answer(f"❌ Schedule conflict! You already have a job on {booking.date_str} at {booking.time_str}.", show_alert=True) 
+            return 
              
         required_points = 1.0 if booking.vehicle in ["TAXI", "Kilo Car"] else float(booking.hours) 
         if driver.wallet_balance < required_points: 
@@ -648,11 +714,15 @@ async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text=f"🔒 **JOB #{b_id} ACCEPTED**\nDriver: {driver.name}", parse_mode="Markdown") 
         await query.answer("✅ Job accepted!") 
  
+        kb = [
+            [InlineKeyboardButton("🏎️ On The Way", callback_data=f"ontheway_{b_id}")],
+            [InlineKeyboardButton("❌ Cancel Job", callback_data=f"dcancelreq_{b_id}")] # <== Updated 18Sep26
+        ]
         await context.bot.send_message(
             chat_id=driver_user.id, 
             text=f"📋 **ACCEPTED TRIP (#{b_id})**\nVehicle: {booking.vehicle}\nLocation:\n{booking.location}\n📞 **Customer Phone:** `{customer_phone}`\nFare: **{fare_display}**", 
             parse_mode="Markdown", 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏎️ On The Way", callback_data=f"ontheway_{b_id}")]])
+            reply_markup=InlineKeyboardMarkup(kb)
         ) 
  
         await context.bot.send_message(chat_id=booking.customer_id, text=f"🚖 **DRIVER ASSIGNED!**\nName: {driver.name}\nPhone: `{driver_phone}`", parse_mode="Markdown")
@@ -671,10 +741,14 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             booking.status = "ON_THE_WAY"
             await session.commit()
             
+            kb = [
+                [InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")],
+                [InlineKeyboardButton("❌ Cancel Job", callback_data=f"dcancelreq_{b_id}")] # <== Updated 18Sep26
+            ]
             await query.edit_message_text(
                 text=f"🏎️ **JOB #{b_id}**\nStatus: On The Way to Pickup",
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📍 Driver Arrived", callback_data=f"arrived_{b_id}")]])
+                reply_markup=InlineKeyboardMarkup(kb)
             )
             
             loc_keyboard = ReplyKeyboardMarkup(
@@ -695,9 +769,13 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif action == "arrived": 
             booking.status = "DRIVER_ARRIVED" 
             await session.commit() 
+            kb = [
+                [InlineKeyboardButton("▶️ Start Trip", callback_data=f"starttrip_{b_id}")],
+                [InlineKeyboardButton("❌ Cancel Job", callback_data=f"dcancelreq_{b_id}")] # <== Updated 18Sep26
+            ]
             await query.edit_message_text(
                 text=f"📍 **JOB #{b_id}**\nDriver Arrived", 
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Start Trip", callback_data=f"starttrip_{b_id}")]])
+                reply_markup=InlineKeyboardMarkup(kb)
             ) 
             await context.bot.send_message(chat_id=booking.customer_id, text="📍 Driver has arrived at your location.") 
 
@@ -715,7 +793,6 @@ async def trip_lifecycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await session.commit() 
             await query.edit_message_text(text=f"🏁 **JOB #{b_id}**\nCompleted") 
             await context.bot.send_message(chat_id=booking.customer_id, text="🏁 Trip completed. Thank you for riding with us!") 
-
 
 async def driver_location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message or update.edited_message
@@ -764,7 +841,6 @@ async def driver_location_handler(update: Update, context: ContextTypes.DEFAULT_
         except Exception as e:
             logger.error(f"Error updating live location for booking {booking.id}: {e}")
 
-
 @app.on_event("startup") 
 async def startup_event(): 
     global telegram_app 
@@ -779,7 +855,7 @@ async def startup_event():
             TIME: [CallbackQueryHandler(time_chosen)],
             HOURS: [CallbackQueryHandler(hours_chosen)], 
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)], 
-            DROP_LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, drop_location_received)],  # <== Updated 15Sep26
+            DROP_LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, drop_location_received)],  
             PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)], 
             C_PHONE: [MessageHandler((filters.TEXT | filters.CONTACT) & ~filters.COMMAND, customer_phone_received)] 
         }, 
@@ -810,10 +886,15 @@ async def startup_event():
     telegram_app.add_handler(driver_conv) 
     telegram_app.add_handler(topup_conv) 
     telegram_app.add_handler(CommandHandler("balance", check_balance_command)) 
+    
+    # <== Updated 18Sep26: Handlers updated below
     telegram_app.add_handler(CallbackQueryHandler(check_balance_callback, pattern="^driver_balance$")) 
-    telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|tapp_|trej_)")) 
+    telegram_app.add_handler(CallbackQueryHandler(admin_actions, pattern="^(approve_|tapp_|trej_|dcancelapp_|dcancelrej_)")) 
     telegram_app.add_handler(CallbackQueryHandler(accept_job, pattern="^accept_")) 
     telegram_app.add_handler(CallbackQueryHandler(trip_lifecycle, pattern="^(ontheway_|arrived_|starttrip_|endtrip_)")) 
+    telegram_app.add_handler(CallbackQueryHandler(customer_cancel, pattern="^ccancel_"))
+    telegram_app.add_handler(CallbackQueryHandler(driver_cancel_req, pattern="^dcancelreq_"))
+    # <== Updated 18Sep26
     
     telegram_app.add_handler(MessageHandler(filters.LOCATION, driver_location_handler))
  
