@@ -2341,6 +2341,7 @@ async def customer_cancel_prompt(
         "❓ **Please type your reason "
         "for cancellation below.**",
         parse_mode="Markdown",
+        reply_markup=None,
     )
 
     # <== Update Phase1_21Sep26
@@ -2458,6 +2459,7 @@ async def customer_cancel_reason(
         if booking.status in [
             "CANCELLED",
             "TRIP_COMPLETED",
+            "CANCEL_REQUESTED",
         ]:
 
             await update.message.reply_text(
@@ -2568,6 +2570,67 @@ async def customer_cancel_reason(
 
 
 # ============================================================
+# BOOKING STATUS / STATE VALIDATION
+# ============================================================
+
+TERMINAL_STATUSES = {
+    "CANCELLED",
+    "TRIP_COMPLETED",
+}
+
+TRIP_TRANSITIONS = {
+    "ontheway": ("ASSIGNED", "ON_THE_WAY"),
+    "arrived": ("ON_THE_WAY", "DRIVER_ARRIVED"),
+    "starttrip": ("DRIVER_ARRIVED", "TRIP_STARTED"),
+    "endtrip": ("TRIP_STARTED", "TRIP_COMPLETED"),
+}
+
+
+async def get_booking_by_id(session, booking_id):
+    result = await session.execute(
+        select(Booking).where(Booking.id == booking_id)
+    )
+    return result.scalar_one_or_none()
+
+
+def clear_driver_cancel_state(booking):
+    booking.cancel_previous_status = None
+    booking.cancel_reason = None
+    booking.cancel_requested_by = None
+    booking.cancel_requested_at = None
+
+
+async def reject_stale_trip_action(query, booking, action):
+    status = booking.status if booking else "NOT_FOUND"
+
+    if status == "CANCEL_REQUESTED":
+        await query.answer(
+            "❌ Cancellation is pending admin approval. "
+            "This trip action is disabled.",
+            show_alert=True,
+        )
+        return True
+
+    if status in TERMINAL_STATUSES:
+        await query.answer(
+            f"❌ This booking is already {status}.",
+            show_alert=True,
+        )
+        return True
+
+    allowed = TRIP_TRANSITIONS.get(action)
+    if allowed and status != allowed[0]:
+        await query.answer(
+            f"❌ Cannot perform '{action}' while booking "
+            f"status is {status}.",
+            show_alert=True,
+        )
+        return True
+
+    return False
+
+
+# ============================================================
 # DRIVER CANCELLATION
 # <== Update Phase1_21Sep26
 # ============================================================
@@ -2615,6 +2678,7 @@ async def driver_cancel_prompt(
         "❓ **Please type your reason "
         "for cancelling this job below.**",
         parse_mode="Markdown",
+        reply_markup=None,
     )
 
     return D_CANCEL_REASON
@@ -2625,42 +2689,21 @@ async def driver_cancel_reason(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
 
-    # <== Update Phase1_21Sep26
-    # Retrieve active cancellation session.
-    b_id = context.user_data.get(
-        "d_cancel_b_id"
-    )
-
-    requested_by = context.user_data.get(
-        "d_cancel_requested_by"
-    )
+    b_id = context.user_data.get("d_cancel_b_id")
+    requested_by = context.user_data.get("d_cancel_requested_by")
 
     if not b_id or not requested_by:
-
         await update.message.reply_text(
             "❌ Cancellation session expired."
         )
-
         return ConversationHandler.END
 
-    # <== Update Phase1_21Sep26
-    # Security check.
     if update.effective_user.id != requested_by:
-
         await update.message.reply_text(
             "❌ Invalid cancellation request."
         )
-
-        context.user_data.pop(
-            "d_cancel_b_id",
-            None,
-        )
-
-        context.user_data.pop(
-            "d_cancel_requested_by",
-            None,
-        )
-
+        context.user_data.pop("d_cancel_b_id", None)
+        context.user_data.pop("d_cancel_requested_by", None)
         return ConversationHandler.END
 
     reason = (
@@ -2668,90 +2711,41 @@ async def driver_cancel_reason(
         if update.message.text
         else "No reason provided"
     )
-
     driver_user = update.message.from_user
 
     async with AsyncSessionLocal() as session:
+        booking = await get_booking_by_id(session, b_id)
 
-        booking = (
-            await session.execute(
-                select(Booking).where(
-                    Booking.id == b_id
-                )
-            )
-        ).scalar_one_or_none()
-
-        # <== Update Phase1_21Sep26
-        # Booking validation.
         if not booking:
-
-            await update.message.reply_text(
-                "❌ Booking not found."
-            )
-
-            context.user_data.pop(
-                "d_cancel_b_id",
-                None,
-            )
-
-            context.user_data.pop(
-                "d_cancel_requested_by",
-                None,
-            )
-
+            await update.message.reply_text("❌ Booking not found.")
+            context.user_data.pop("d_cancel_b_id", None)
+            context.user_data.pop("d_cancel_requested_by", None)
             return ConversationHandler.END
 
-        # <== Update Phase1_21Sep26
-        # Verify this driver owns the booking.
-        if (
-            booking.driver_id
-            != driver_user.id
-        ):
-
+        if booking.driver_id != driver_user.id:
             await update.message.reply_text(
-                "❌ You are not assigned "
-                "to this booking."
+                "❌ You are not assigned to this booking."
             )
-
-            context.user_data.pop(
-                "d_cancel_b_id",
-                None,
-            )
-
-            context.user_data.pop(
-                "d_cancel_requested_by",
-                None,
-            )
-
+            context.user_data.pop("d_cancel_b_id", None)
+            context.user_data.pop("d_cancel_requested_by", None)
             return ConversationHandler.END
 
-        # <== Update Phase1_21Sep26
-        # Do not allow cancellation after completion.
-        if booking.status in [
-            "CANCELLED",
-            "TRIP_COMPLETED",
-        ]:
-
+        if booking.status in TERMINAL_STATUSES:
             await update.message.reply_text(
-                "❌ This booking is already "
-                "cancelled or completed."
+                "❌ This booking is already cancelled or completed."
             )
-
-            context.user_data.pop(
-                "d_cancel_b_id",
-                None,
-            )
-
-            context.user_data.pop(
-                "d_cancel_requested_by",
-                None,
-            )
-
+            context.user_data.pop("d_cancel_b_id", None)
+            context.user_data.pop("d_cancel_requested_by", None)
             return ConversationHandler.END
 
-        # <== Update Phase1_21Sep26
-        # Only assigned/active jobs can request
-        # driver cancellation.
+        if booking.status == "CANCEL_REQUESTED":
+            await update.message.reply_text(
+                "⏳ A cancellation request is already pending admin approval."
+            )
+            context.user_data.pop("d_cancel_b_id", None)
+            context.user_data.pop("d_cancel_requested_by", None)
+            return ConversationHandler.END
+
         allowed_statuses = [
             "ASSIGNED",
             "ON_THE_WAY",
@@ -2760,61 +2754,76 @@ async def driver_cancel_reason(
         ]
 
         if booking.status not in allowed_statuses:
-
             await update.message.reply_text(
-                f"❌ Driver cancellation is not "
-                f"available for booking status: "
-                f"{booking.status}"
+                f"❌ Driver cancellation is not available "
+                f"for booking status: {booking.status}"
             )
-
-            context.user_data.pop(
-                "d_cancel_b_id",
-                None,
-            )
-
-            context.user_data.pop(
-                "d_cancel_requested_by",
-                None,
-            )
-
+            context.user_data.pop("d_cancel_b_id", None)
+            context.user_data.pop("d_cancel_requested_by", None)
             return ConversationHandler.END
 
-        # <== Update Phase1_21Sep26
-        # Notify customer that a cancellation
-        # request was submitted.
-        try:
+        # IMPORTANT:
+        # Freeze the booking immediately while admin reviews it.
+        # This prevents old/stale On The Way / Start Trip callbacks
+        # from changing the booking during cancellation review.
+        booking.cancel_previous_status = booking.status
+        booking.cancel_reason = reason
+        booking.cancel_requested_by = driver_user.id
+        booking.cancel_requested_at = datetime.utcnow()
+        booking.status = "CANCEL_REQUESTED"
 
-            await context.bot.send_message(
-                chat_id=booking.customer_id,
-                text=(
-                    "⚠️ **Driver Cancellation Request**\n\n"
-                    f"Your driver has requested "
-                    f"to cancel Job #{b_id}.\n\n"
-                    f"📝 Reason: {reason}\n\n"
-                    "Please wait while our admin "
-                    "processes the request."
-                ),
-                parse_mode="Markdown",
-            )
+        await session.commit()
 
-        except Exception as e:
+        customer_id = booking.customer_id
+        previous_status = booking.cancel_previous_status
 
-            logger.error(
-                "Failed to send passenger "
-                f"cancel notice: {e}"
-            )
+    # Remove all buttons from the driver's old message.
+    try:
+        await update.message.reply_text(
+            "⏳ **CANCELLATION REQUEST SENT**\n\n"
+            f"🆔 Job: `{b_id}`\n"
+            f"📝 Reason: {reason}\n\n"
+            "The job is now **locked** while admin reviews it.\n"
+            "You cannot use On The Way, Arrived, Start Trip, "
+            "or End Trip until admin decides.",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to send driver cancellation confirmation "
+            f"for {b_id}: {e}"
+        )
 
-    # <== Update Phase1_21Sep26
-    # Send request to admin.
+    # Notify customer immediately that the driver requested cancellation.
+    try:
+        await context.bot.send_message(
+            chat_id=customer_id,
+            text=(
+                "⚠️ **Driver Cancellation Request**\n\n"
+                f"Your driver has requested to cancel Job #{b_id}.\n\n"
+                f"📝 Reason: {reason}\n\n"
+                "The booking is temporarily paused while our admin "
+                "reviews the request."
+            ),
+            parse_mode="Markdown",
+        )
+        logger.info(
+            f"Driver cancellation customer notification sent: "
+            f"booking={b_id}, customer={customer_id}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to send customer cancellation notice "
+            f"for {b_id}, customer={customer_id}: {e}"
+        )
+
     if ADMIN_GROUP_ID:
-
         text = (
             "⚠️ **DRIVER CANCELLATION REQUEST**\n\n"
-            f"👨‍✈️ Driver: "
-            f"{driver_user.full_name}\n"
-            f"🆔 Driver ID: "
-            f"`{driver_user.id}`\n"
+            f"👨‍✈️ Driver: {driver_user.full_name}\n"
+            f"🆔 Driver ID: `{driver_user.id}`\n"
             f"🚗 Job ID: `{b_id}`\n"
+            f"📌 Previous Status: `{previous_status}`\n"
             f"📝 Reason: {reason}\n\n"
             "Please approve or reject."
         )
@@ -2823,59 +2832,55 @@ async def driver_cancel_reason(
             [
                 InlineKeyboardButton(
                     "✅ Approve & Refund",
-                    callback_data=(
-                        f"dcancelapp_"
-                        f"{b_id}_"
-                        f"{driver_user.id}"
-                    ),
+                    callback_data=f"dcancelapp_{b_id}_{driver_user.id}",
                 )
             ],
             [
                 InlineKeyboardButton(
                     "❌ Reject",
-                    callback_data=(
-                        f"dcancelrej_"
-                        f"{b_id}_"
-                        f"{driver_user.id}"
-                    ),
+                    callback_data=f"dcancelrej_{b_id}_{driver_user.id}",
                 )
             ],
         ]
 
-        await context.bot.send_message(
-            chat_id=ADMIN_GROUP_ID,
-            text=text,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(
-                kb
-            ),
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_GROUP_ID,
+                text=text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(kb),
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to send cancellation request to admin "
+                f"for {b_id}: {e}"
+            )
 
         await update.message.reply_text(
             "⏳ **Cancellation requested.**\n\n"
-            f"📝 Reason: {reason}\n\n"
-            "Waiting for admin approval.",
+            "The booking is locked until admin approval.\n"
+            "You will be notified of the decision.",
             parse_mode="Markdown",
         )
-
     else:
+        # Do not leave a permanently locked job if admin is not configured.
+        async with AsyncSessionLocal() as session:
+            booking = await get_booking_by_id(session, b_id)
+            if booking and booking.status == "CANCEL_REQUESTED":
+                booking.status = (
+                    booking.cancel_previous_status or "ASSIGNED"
+                )
+                clear_driver_cancel_state(booking)
+                await session.commit()
 
         await update.message.reply_text(
             "❌ Admin group is not configured. "
-            "Cancellation request cannot be processed."
+            "The cancellation request was not submitted, "
+            "and the booking has been restored."
         )
 
-    # <== Update Phase1_21Sep26
-    # Clear cancellation session.
-    context.user_data.pop(
-        "d_cancel_b_id",
-        None,
-    )
-
-    context.user_data.pop(
-        "d_cancel_requested_by",
-        None,
-    )
+    context.user_data.pop("d_cancel_b_id", None)
+    context.user_data.pop("d_cancel_requested_by", None)
 
     return ConversationHandler.END
 
@@ -3446,94 +3451,67 @@ async def admin_actions(
     # <== Update Phase1_21Sep26
     # ========================================================
 
-    elif data.startswith(
-        "dcancelapp_"
-    ):
+    elif data.startswith("dcancelapp_"):
 
         parts = data.split("_")
-
         if len(parts) != 3:
-
             await query.answer(
                 "❌ Invalid cancellation request.",
                 show_alert=True,
             )
-
             return
 
         b_id = parts[1]
-        d_id = int(parts[2])
+        try:
+            d_id = int(parts[2])
+        except ValueError:
+            await query.answer(
+                "❌ Invalid driver ID.",
+                show_alert=True,
+            )
+            return
 
         async with AsyncSessionLocal() as session:
-
-            booking = (
-                await session.execute(
-                    select(Booking).where(
-                        Booking.id == b_id
-                    )
-                )
-            ).scalar_one_or_none()
+            booking = await get_booking_by_id(session, b_id)
 
             if not booking:
-
                 await query.answer(
                     "❌ Booking not found.",
                     show_alert=True,
                 )
-
                 return
 
-            # <== Update Phase1_21Sep26
-            # Prevent duplicate admin approval.
-            if booking.status in [
-                "CANCELLED",
-                "TRIP_COMPLETED",
-            ]:
-
-                await query.answer(
-                    "❌ Booking is already "
-                    "cancelled or completed.",
-                    show_alert=True,
-                )
-
-                return
-
-            # <== Update Phase1_21Sep26
-            # Make sure admin action is for
-            # the actual assigned driver.
             if booking.driver_id != d_id:
-
                 await query.answer(
-                    "❌ Driver does not match "
-                    "the assigned booking.",
+                    "❌ Driver does not match the assigned booking.",
                     show_alert=True,
                 )
+                return
 
+            if booking.status != "CANCEL_REQUESTED":
+                await query.answer(
+                    f"❌ Cancellation is not pending. "
+                    f"Current status: {booking.status}",
+                    show_alert=True,
+                )
                 return
 
             driver = (
                 await session.execute(
                     select(Driver).where(
-                        Driver.telegram_id
-                        == d_id
+                        Driver.telegram_id == d_id
                     )
                 )
             ).scalar_one_or_none()
 
             if driver:
-
                 points_refund = (
                     1.0
-                    if booking.vehicle
-                    in ["TAXI", "Kilo Car"]
-                    else float(
-                        booking.hours
-                    )
+                    if booking.vehicle in ["TAXI", "Kilo Car"]
+                    else float(booking.hours)
                 )
 
-                driver.wallet_balance += (
-                    points_refund
-                )
+                driver.wallet_balance += points_refund
 
                 session.add(
                     WalletTransaction(
@@ -3544,128 +3522,155 @@ async def admin_actions(
                     )
                 )
 
-            # <== Update Phase1_21Sep26
-            # Put job back into driver dispatch.
-            booking.status = "AVAILABLE"
+            customer_id = booking.customer_id
 
+            # Approved driver cancellation:
+            # booking becomes CANCELLED, so no stale lifecycle callback
+            # can restart the trip.
+            booking.status = "CANCELLED"
             booking.driver_id = None
             booking.driver_name = None
+            clear_driver_cancel_state(booking)
 
             await session.commit()
 
-            customer_id = (
-                booking.customer_id
-            )
-
-        # <== Update Phase1_21Sep26
-        # Notify driver.
         try:
-
             await context.bot.send_message(
                 chat_id=d_id,
                 text=(
-                    f"✅ Admin approved your "
-                    f"cancellation for Job #{b_id}.\n\n"
-                    "💰 Your commission points "
-                    "have been refunded."
+                    f"✅ Admin approved your cancellation "
+                    f"for Job #{b_id}.\n\n"
+                    "💰 Your commission points have been refunded.\n"
+                    "The job is now cancelled."
                 ),
             )
-
         except Exception as e:
-
             logger.error(
-                "Failed to notify driver "
-                f"after cancellation approval: {e}"
+                f"Failed to notify driver after cancellation approval "
+                f"for {b_id}: {e}"
             )
 
-        # <== Update Phase1_21Sep26
-        # Notify customer.
         try:
-
             await context.bot.send_message(
                 chat_id=customer_id,
                 text=(
-                    f"⚠️ The driver cancellation "
-                    f"for Job #{b_id} has been "
-                    "approved.\n\n"
-                    "🔎 We are looking for "
-                    "another driver now."
+                    f"⚠️ Driver cancellation for Job #{b_id} "
+                    "has been approved.\n\n"
+                    "🚫 This booking is now cancelled.\n"
+                    "Please make a new booking if you still need a car."
                 ),
             )
-
         except Exception as e:
-
             logger.error(
-                "Failed to notify customer "
-                f"after driver cancellation: {e}"
+                f"Failed to notify customer after cancellation approval "
+                f"for {b_id}, customer={customer_id}: {e}"
             )
 
         await query.edit_message_text(
             f"{query.message.text}\n\n"
-            "✅ **Approved and Refunded.**\n"
-            "Job is AVAILABLE again.",
+            "✅ **APPROVED & REFUNDED**\n"
+            "Booking is now CANCELLED.",
             parse_mode="Markdown",
+            reply_markup=None,
         )
 
     # ========================================================
     # DRIVER CANCEL REJECTED
     # ========================================================
 
-    elif data.startswith(
-        "dcancelrej_"
-    ):
+    elif data.startswith("dcancelrej_"):
 
         parts = data.split("_")
-
         if len(parts) != 3:
-
             await query.answer(
                 "❌ Invalid cancellation request.",
                 show_alert=True,
             )
-
             return
 
         b_id = parts[1]
-        d_id = int(parts[2])
+        try:
+            d_id = int(parts[2])
+        except ValueError:
+            await query.answer(
+                "❌ Invalid driver ID.",
+                show_alert=True,
+            )
+            return
 
         async with AsyncSessionLocal() as session:
+            booking = await get_booking_by_id(session, b_id)
 
-            booking = (
-                await session.execute(
-                    select(Booking).where(
-                        Booking.id == b_id
-                    )
+            if not booking:
+                await query.answer(
+                    "❌ Booking not found.",
+                    show_alert=True,
                 )
-            ).scalar_one_or_none()
+                return
 
-            if booking:
+            if booking.driver_id != d_id:
+                await query.answer(
+                    "❌ Driver does not match the booking.",
+                    show_alert=True,
+                )
+                return
 
-                # <== Update Phase1_21Sep26
-                # Verify the same driver still owns job.
-                if booking.driver_id != d_id:
+            if booking.status != "CANCEL_REQUESTED":
+                await query.answer(
+                    f"❌ Cancellation is not pending. "
+                    f"Current status: {booking.status}",
+                    show_alert=True,
+                )
+                return
 
-                    await query.answer(
-                        "❌ Driver does not match "
-                        "the booking.",
-                        show_alert=True,
-                    )
+            previous_status = (
+                booking.cancel_previous_status or "ASSIGNED"
+            )
+            customer_id = booking.customer_id
 
-                    return
+            booking.status = previous_status
+            clear_driver_cancel_state(booking)
 
-        await context.bot.send_message(
-            chat_id=d_id,
-            text=(
-                f"❌ Admin rejected your "
-                f"cancellation for Job #{b_id}.\n\n"
-                "Please continue the trip."
-            ),
-        )
+            await session.commit()
+
+        try:
+            await context.bot.send_message(
+                chat_id=d_id,
+                text=(
+                    f"❌ Admin rejected your cancellation "
+                    f"for Job #{b_id}.\n\n"
+                    f"Booking status restored to `{previous_status}`.\n"
+                    "You may continue the trip."
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to notify driver after cancellation rejection "
+                f"for {b_id}: {e}"
+            )
+
+        try:
+            await context.bot.send_message(
+                chat_id=customer_id,
+                text=(
+                    f"ℹ️ Driver cancellation for Job #{b_id} "
+                    "was rejected by admin.\n\n"
+                    "Your current driver will continue the trip."
+                ),
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to notify customer after cancellation rejection "
+                f"for {b_id}: {e}"
+            )
 
         await query.edit_message_text(
             f"{query.message.text}\n\n"
-            "❌ **Rejected.**",
+            "❌ **REJECTED**\n"
+            f"Booking restored to `{previous_status}`.",
             parse_mode="Markdown",
+            reply_markup=None,
         )
 
 
@@ -4006,45 +4011,66 @@ async def trip_lifecycle(
 ):
 
     query = update.callback_query
-
     await query.answer()
 
-    action, b_id = query.data.split("_")
+    try:
+        action, b_id = query.data.split("_", 1)
+    except ValueError:
+        await query.answer(
+            "❌ Invalid trip action.",
+            show_alert=True,
+        )
+        return
 
     async with AsyncSessionLocal() as session:
-
+        # Lock the row so two stale callbacks cannot change the
+        # booking at the same time.
         booking = (
             await session.execute(
-                select(Booking).where(
-                    Booking.id == b_id
-                )
+                select(Booking)
+                .where(Booking.id == b_id)
+                .with_for_update()
             )
         ).scalar_one_or_none()
 
         if not booking:
+            await query.answer(
+                "❌ Booking not found.",
+                show_alert=True,
+            )
+            return
+
+        # IMPORTANT FIX:
+        # Always validate the current DB status before changing it.
+        if await reject_stale_trip_action(query, booking, action):
+            return
+
+        await query.answer()
+
+        # Also make sure only the assigned driver can operate
+        # the trip lifecycle buttons.
+        if booking.driver_id != query.from_user.id:
+            await query.answer(
+                "❌ You are not the assigned driver for this booking.",
+                show_alert=True,
+            )
             return
 
         if action == "ontheway":
-
             booking.status = "ON_THE_WAY"
-
             await session.commit()
 
             kb = [
                 [
                     InlineKeyboardButton(
                         "📍 Driver Arrived",
-                        callback_data=(
-                            f"arrived_{b_id}"
-                        ),
+                        callback_data=f"arrived_{b_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
                         "❌ Cancel Job",
-                        callback_data=(
-                            f"dcancelreq_{b_id}"
-                        ),
+                        callback_data=f"dcancelreq_{b_id}",
                     )
                 ],
             ]
@@ -4052,13 +4078,10 @@ async def trip_lifecycle(
             await query.edit_message_text(
                 text=(
                     f"🏎️ **JOB #{b_id}**\n"
-                    "Status: On The Way "
-                    "to Pickup"
+                    "Status: On The Way to Pickup"
                 ),
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(
-                    kb
-                ),
+                reply_markup=InlineKeyboardMarkup(kb),
             )
 
             loc_keyboard = ReplyKeyboardMarkup(
@@ -4074,50 +4097,53 @@ async def trip_lifecycle(
                 resize_keyboard=True,
             )
 
-            await context.bot.send_message(
-                chat_id=query.from_user.id,
-                text=(
-                    "📍 Please tap the button "
-                    "below to share your "
-                    "**Live Location** so "
-                    "the customer can track you:"
-                ),
-                parse_mode="Markdown",
-                reply_markup=loc_keyboard,
-            )
+            try:
+                await context.bot.send_message(
+                    chat_id=query.from_user.id,
+                    text=(
+                        "📍 Please tap the button below to share "
+                        "your **Live Location** so the customer "
+                        "can track you:"
+                    ),
+                    parse_mode="Markdown",
+                    reply_markup=loc_keyboard,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to send live location prompt "
+                    f"for {b_id}: {e}"
+                )
 
-            await context.bot.send_message(
-                chat_id=booking.customer_id,
-                text=(
-                    f"🏎️ **Driver "
-                    f"({booking.driver_name}) "
-                    "is on the way to your "
-                    "pickup location!**"
-                ),
-                parse_mode="Markdown",
-            )
+            try:
+                await context.bot.send_message(
+                    chat_id=booking.customer_id,
+                    text=(
+                        f"🏎️ **Driver ({booking.driver_name}) "
+                        "is on the way to your pickup location!**"
+                    ),
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to notify customer On The Way "
+                    f"for {b_id}: {e}"
+                )
 
         elif action == "arrived":
-
             booking.status = "DRIVER_ARRIVED"
-
             await session.commit()
 
             kb = [
                 [
                     InlineKeyboardButton(
                         "▶️ Start Trip",
-                        callback_data=(
-                            f"starttrip_{b_id}"
-                        ),
+                        callback_data=f"starttrip_{b_id}",
                     )
                 ],
                 [
                     InlineKeyboardButton(
                         "❌ Cancel Job",
-                        callback_data=(
-                            f"dcancelreq_{b_id}"
-                        ),
+                        callback_data=f"dcancelreq_{b_id}",
                     )
                 ],
             ]
@@ -4127,23 +4153,23 @@ async def trip_lifecycle(
                     f"📍 **JOB #{b_id}**\n"
                     "Driver Arrived"
                 ),
-                reply_markup=InlineKeyboardMarkup(
-                    kb
-                ),
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(kb),
             )
 
-            await context.bot.send_message(
-                chat_id=booking.customer_id,
-                text=(
-                    "📍 Driver has arrived "
-                    "at your location."
-                ),
-            )
+            try:
+                await context.bot.send_message(
+                    chat_id=booking.customer_id,
+                    text="📍 Driver has arrived at your location.",
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to notify customer Driver Arrived "
+                    f"for {b_id}: {e}"
+                )
 
         elif action == "starttrip":
-
             booking.status = "TRIP_STARTED"
-
             await session.commit()
 
             await query.edit_message_text(
@@ -4151,41 +4177,38 @@ async def trip_lifecycle(
                     f"▶️ **JOB #{b_id}**\n"
                     "Trip Started"
                 ),
+                parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(
                     [
                         [
                             InlineKeyboardButton(
                                 "🏁 End Trip",
-                                callback_data=(
-                                    f"endtrip_{b_id}"
-                                ),
+                                callback_data=f"endtrip_{b_id}",
                             )
                         ],
-                        # <== Update Phase1_21Sep26
                         [
                             InlineKeyboardButton(
                                 "❌ Cancel Job",
-                                callback_data=(
-                                    f"dcancelreq_{b_id}"
-                                ),
+                                callback_data=f"dcancelreq_{b_id}",
                             )
                         ],
                     ]
                 ),
-                parse_mode="Markdown",
             )
 
-            await context.bot.send_message(
-                chat_id=booking.customer_id,
-                text=(
-                    "▶️ Your trip has started."
-                ),
-            )
+            try:
+                await context.bot.send_message(
+                    chat_id=booking.customer_id,
+                    text="▶️ Your trip has started.",
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to notify customer Trip Started "
+                    f"for {b_id}: {e}"
+                )
 
         elif action == "endtrip":
-
             booking.status = "TRIP_COMPLETED"
-
             await session.commit()
 
             await query.edit_message_text(
@@ -4194,15 +4217,22 @@ async def trip_lifecycle(
                     "Completed"
                 ),
                 parse_mode="Markdown",
+                reply_markup=None,
             )
 
-            await context.bot.send_message(
-                chat_id=booking.customer_id,
-                text=(
-                    "🏁 Trip completed. "
-                    "Thank you for riding with us!"
-                ),
-            )
+            try:
+                await context.bot.send_message(
+                    chat_id=booking.customer_id,
+                    text=(
+                        "🏁 Trip completed. "
+                        "Thank you for riding with us!"
+                    ),
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to notify customer Trip Completed "
+                    f"for {b_id}: {e}"
+                )
 
 
 # ============================================================
