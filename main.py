@@ -59,9 +59,9 @@ TOPUP_PACKAGES = {
     "pkg_1000": {"points": 1000, "price": 1000 * MMK_PER_POINT},
 }
 
-VEHICLE, BOOKING_MODE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, PASSENGERS, C_PHONE, CONFIRM_BOOKING = range(10)  
-D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(10, 14)  
-TOPUP_PKG, TOPUP_RECEIPT = range(14, 16)  
+VEHICLE, BOOKING_MODE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, C_PHONE, CONFIRM_BOOKING = range(9)  
+D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(9, 13)  
+TOPUP_PKG, TOPUP_RECEIPT = range(13, 15)  
 
 app = FastAPI()
 telegram_app = None
@@ -536,28 +536,25 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         context.user_data["pickup_lng"] = loc.longitude  
     else: 
         context.user_data["location"] = update.message.text 
+        context.user_data["pickup_lat"] = None
+        context.user_data["pickup_lng"] = None
 
     if context.user_data.get("vehicle") in ["TAXI", "Kilo Car"]:  
-        if context.user_data.get("vehicle") == "Kilo Car" and (
-            context.user_data.get("pickup_lat") is None or context.user_data.get("pickup_lng") is None
-        ):  
-            await update.message.reply_text(  
-                "❌ Kilo Car requires GPS pickup location. Please tap the 📎 / Location button and send your current pickup point."  
-            )  
-            return LOCATION  
-
         await update.message.reply_text( 
-            "📍 Please click the 📎 (paperclip) icon, choose **Location**, "
-            "select your **Drop-off point** on the map, and send it.",
+            "📍 Please send your **Drop-off location** (Share a Map Location or just type the address):",
             reply_markup=ReplyKeyboardRemove()
         ) 
         return DROP_LOCATION
 
-    await update.message.reply_text(
-        "👥 How many passengers will be riding?",
-        reply_markup=ReplyKeyboardRemove()
+    phone_keyboard = ReplyKeyboardMarkup( 
+        [[KeyboardButton("📞 Share Contact Phone", request_contact=True)]], 
+        one_time_keyboard=True, resize_keyboard=True 
     ) 
-    return PASSENGERS 
+    await update.message.reply_text( 
+        "📞 Please tap the button to share your **Phone Number**:", 
+        reply_markup=phone_keyboard 
+    ) 
+    return C_PHONE 
 
 
 async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -567,30 +564,19 @@ async def drop_location_received(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["drop_lat"] = loc.latitude  
         context.user_data["drop_lng"] = loc.longitude  
     else:  
-        await update.message.reply_text(
-            "❌ Text input is disabled. Please use 📎 (paperclip) -> Location to choose on the map."
-        ) 
-        return DROP_LOCATION 
-
-    await update.message.reply_text(
-        "👥 How many passengers will be riding?",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    return PASSENGERS
-
-
-async def passengers_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
-    context.user_data["passengers"] = update.message.text 
+        context.user_data["drop_location"] = update.message.text 
+        context.user_data["drop_lat"] = None  
+        context.user_data["drop_lng"] = None
 
     phone_keyboard = ReplyKeyboardMarkup( 
         [[KeyboardButton("📞 Share Contact Phone", request_contact=True)]], 
         one_time_keyboard=True, resize_keyboard=True 
     ) 
     await update.message.reply_text( 
-        "📞 Please enter or share your **Phone Contact Number**:", 
+        "📞 Please tap the button to share your **Phone Number**:", 
         reply_markup=phone_keyboard 
     ) 
-    return C_PHONE 
+    return C_PHONE
 
 
 async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
@@ -603,6 +589,13 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
 
     booking_id = f"RNT-{get_yangon_now().strftime('%Y%m%d')}-{int(get_yangon_now().timestamp()) % 10000}"  
     vehicle = data["vehicle"]
+    
+    if vehicle == "Sedan":
+        data["passengers"] = 4
+    elif vehicle == "SUV":
+        data["passengers"] = 5
+    else:
+        data["passengers"] = 8
 
     if vehicle in ["TAXI", "Kilo Car"]:
         p_lat = data.get("pickup_lat")
@@ -610,18 +603,16 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         d_lat = data.get("drop_lat")
         d_lng = data.get("drop_lng")
 
-        if p_lat is None or p_lng is None or d_lat is None or d_lng is None:  
-            await update.message.reply_text(
-                "❌ Pickup and drop-off GPS coordinates are required for Kilo Car."
-            )
-            return DROP_LOCATION
-
-        direction_link = f"https://www.google.com/maps/dir/?api=1&origin={p_lat},{p_lng}&destination={d_lat},{d_lng}"
-
-        road_km, route_minutes, distance_source = await get_road_route_km_duration(  
-            p_lat, p_lng, d_lat, d_lng
-        )  
-        calculated_fare = calculate_kilo_fare(road_km)  
+        if p_lat and p_lng and d_lat and d_lng:  
+            direction_link = f"https://www.google.com/maps/dir/?api=1&origin={p_lat},{p_lng}&destination={d_lat},{d_lng}"
+            road_km, route_minutes, distance_source = await get_road_route_km_duration(p_lat, p_lng, d_lat, d_lng)  
+            calculated_fare = calculate_kilo_fare(road_km)  
+        else:
+            direction_link = "N/A (Text Address Used)"
+            road_km = 0
+            route_minutes = None
+            distance_source = "Text Address (Actual meter applies)"
+            calculated_fare = KILO_BASE_FARE
 
         final_location = (
             f"**Pickup:** {data['location']}\n"
@@ -632,7 +623,7 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
         hours_label = "Point-to-Point (Kilo Car)"
         points_required = 1.0
         hours_db_value = max(1, math.ceil(route_minutes / 60.0)) if route_minutes is not None else 1  
-        fare_display = f"{calculated_fare:,.0f} MMK ({road_km:.1f} km)"  
+        fare_display = f"{calculated_fare:,.0f} MMK ({road_km:.1f} km)" if road_km > 0 else f"{KILO_BASE_FARE:,.0f} MMK (Base Fare - Meter Applies)"
         fare_db_value = calculated_fare
 
         data["route_distance_km"] = road_km  
@@ -659,25 +650,24 @@ async def customer_phone_received(update: Update, context: ContextTypes.DEFAULT_
     booking_mode_label = "⚡ Book Now (ASAP)" if data.get("booking_mode") == "INSTANT" else "📅 Scheduled"  
 
     if vehicle == "Kilo Car":
-        end_label = f"Estimated Arrival: **{data['eta_time']}**" if data.get("eta_time") else "Arrival: **Routing ETA unavailable**"  
+        end_label = f"Estimated Arrival: **{data['eta_time']}**" if data.get("eta_time") else "Arrival: **To be determined**"  
     else:
         end_label = f"Scheduled End: **{data.get('end_time', format_end_time(start_dt, hours_db_value * 60))}**"  
 
     summary = (  
         f"🧾 **PLEASE CONFIRM YOUR BOOKING**\n\n"
         f"🆔 Booking ID: `{booking_id}`\n"
-        f"🚙 Vehicle: {vehicle}\n"
+        f"🚙 Vehicle: {vehicle} (Max {data['passengers']} Pax)\n"
         f"📌 Booking Type: **{booking_mode_label}**\n"
         f"📅 Date: {data['date']}\n"
         f"🕐 Pickup: {data['time']}\n"
         f"{end_label}\n"
         f"⏱ Package: {hours_label}\n"
         f"📍 Location:\n{final_location}\n"
-        f"👥 Passengers: {data['passengers']}\n"
         f"📞 Contact: `{phone}`\n"
     )  
 
-    if vehicle == "Kilo Car":  
+    if vehicle == "Kilo Car" and data.get("route_distance_km", 0) > 0:  
         summary += (  
             f"\n📏 Road Distance: **{data.get('route_distance_km', 0):.1f} km**\n"
             f"🛣️ Distance Basis: {data.get('distance_source', 'N/A')}\n"
@@ -757,7 +747,7 @@ async def booking_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         start_at=schedule_start_dt,  
         end_at=schedule_end_dt,  
         location=final_location,
-        passengers=int(data["passengers"]),
+        passengers=data["passengers"],
         fare_mmk=fare_db_value,
         status="AVAILABLE",
         payment_method="DIRECT",
@@ -788,7 +778,8 @@ async def booking_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         route_line = (
             f"📏 Road Distance: **{data.get('route_distance_km', 0):.1f} km**\n"
             f"🛣️ Distance Basis: {data.get('distance_source', 'N/A')}\n"
-        )
+        ) if data.get("route_distance_km", 0) > 0 else "🛣️ Distance Basis: Text Address (Meter applies)\n"
+        
         if data.get("route_duration_minutes") is not None:
             route_line += f"⏱ Estimated Drive: **{round(data['route_duration_minutes'])} min**\n"
             route_line += f"🏁 Estimated Arrival: **{data.get('eta_time', 'N/A')}**\n"
@@ -799,14 +790,13 @@ async def booking_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     confirmed_text = (
         f"✅ **BOOKING CONFIRMED**\n\n"
         f"🆔 Booking ID: `{booking_id}`\n"
-        f"🚙 Vehicle: {vehicle}\n"
+        f"🚙 Vehicle: {vehicle} (Max {data['passengers']} Pax)\n"
         f"📌 Booking Type: **{mode_label}**\n"
         f"📅 Date: {data['date']}\n"
         f"🕐 Pickup: {data['time']}\n"
         f"{end_line}"
         f"⏱ Package: {hours_label}\n"
         f"📍 Location:\n{final_location}\n"
-        f"👥 Passengers: {data['passengers']}\n"
         f"📞 Contact: `{phone}`\n\n"
         f"💰 **Total Fare: {fare_display}**\n\n"
         f"🔎 Status: **Finding a driver...**"
@@ -1101,15 +1091,86 @@ async def driver_cancel_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
     b_id = query.data.split("_")[1]
     driver_user = query.from_user
 
-    if ADMIN_GROUP_ID:
-        text = f"⚠️ **DRIVER CANCELLATION REQUEST**\n\nDriver: {driver_user.full_name}\nJob ID: `{b_id}`\n\nPlease approve or reject."
-        kb = [
-            [InlineKeyboardButton("✅ Approve & Refund", callback_data=f"dcancelapp_{b_id}_{driver_user.id}")],
-            [InlineKeyboardButton("❌ Reject", callback_data=f"dcancelrej_{b_id}_{driver_user.id}")]
-        ]
-        await context.bot.send_message(chat_id=ADMIN_GROUP_ID, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(kb))
+    async with AsyncSessionLocal() as session:
+        booking = (await session.execute(select(Booking).where(Booking.id == b_id))).scalar_one_or_none()
+        driver = (await session.execute(select(Driver).where(Driver.telegram_id == driver_user.id))).scalar_one_or_none()
         
-        await query.edit_message_text(f"{query.message.text}\n\n⏳ Cancellation requested. Waiting for admin approval.")
+        if not booking or not driver or booking.status in ["CANCELLED", "TRIP_COMPLETED", "AVAILABLE"]:
+            await query.edit_message_text("❌ You cannot cancel this job right now.")
+            return
+
+        today = get_yangon_now().date()
+        
+        if driver.last_cancel_date != today:
+            driver.daily_cancels = 0
+            driver.last_cancel_date = today
+
+        driver.daily_cancels += 1
+        
+        points_cost = 1.0 if booking.vehicle in ["TAXI", "Kilo Car"] else float(booking.hours)
+
+        if driver.daily_cancels == 1:
+            driver.wallet_balance += points_cost
+            session.add(WalletTransaction(driver_telegram_id=driver.telegram_id, amount=points_cost, type="REFUND", booking_id=booking.id))
+            
+            driver_msg = (
+                f"✅ **Job #{b_id} Cancelled.**\n\n"
+                f"⚠️ **WARNING (1/2):** Your {points_cost:,.0f} points have been refunded. "
+                f"If you cancel another job today, you will **lose your points** as a penalty."
+            )
+        else:
+            session.add(WalletTransaction(driver_telegram_id=driver.telegram_id, amount=0, type="PENALTY", booking_id=booking.id))
+            
+            driver_msg = (
+                f"🚫 **Job #{b_id} Cancelled.**\n\n"
+                f"❌ **PENALTY APPLIED:** This is cancellation #{driver.daily_cancels} today. "
+                f"Your {points_cost:,.0f} points have **not** been refunded."
+            )
+
+        booking.status = "AVAILABLE" 
+        booking.driver_id = None
+        booking.driver_name = None
+        await session.commit()
+        
+        await query.edit_message_text(driver_msg, parse_mode="Markdown")
+
+        await context.bot.send_message(
+            chat_id=booking.customer_id, 
+            text=(
+                f"⚠️ **DRIVER CANCELLED**\n\n"
+                f"Your assigned driver had an emergency and had to cancel. "
+                f"Don't worry, your job (#{b_id}) is active and we are finding a new driver for you right away!"
+            ),
+            parse_mode="Markdown"
+        )
+
+        if DRIVER_GROUP_ID:
+            booking_type_line = "⚡ Book Now (ASAP)" if booking.booking_mode == "INSTANT" else "📅 Scheduled"  
+            timing_line = f"🛣️ Road Distance: {booking.route_distance_km or 0:.1f} km" if booking.vehicle == "Kilo Car" else "🏁 Scheduled Job"
+            hours_label = "Point-to-Point (Kilo Car)" if booking.vehicle == "Kilo Car" else f"{booking.hours} Hours"
+            fare_display = f"{booking.fare_mmk:,.0f} MMK" if booking.fare_mmk > 0 else "Base Fare"
+
+            driver_text = (  
+                f"⚠️ **JOB RE-OPENED (Driver Cancelled)** ⚠️\n\n"
+                f"🆔 `{booking.id}`\n"
+                f"📌 Booking Type: {booking_type_line}\n"
+                f"📅 {booking.date_str} | 🕐 {booking.time_str}\n"
+                f"{timing_line}\n"
+                f"⏱ Package: {hours_label} | 👥 {booking.passengers} Pax\n"
+                f"🚙 Vehicle: {booking.vehicle}\n"
+                f"📍 **Location:**\n{booking.location}\n\n"
+                f"💰 Fare: **{fare_display}**\n"
+                f"➕ Commission Deduction: **{points_cost:,.0f} Points**"
+            )
+            kb = [[InlineKeyboardButton("✅ ACCEPT JOB", callback_data=f"accept_{booking.id}")]]
+            
+            await context.bot.send_message(
+                chat_id=DRIVER_GROUP_ID,
+                text=driver_text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(kb),
+                disable_web_page_preview=True
+            )
 
 
 async def accept_job(update: Update, context: ContextTypes.DEFAULT_TYPE): 
@@ -1358,7 +1419,6 @@ async def startup_event():
             HOURS: [CallbackQueryHandler(hours_chosen)], 
             LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, location_received)], 
             DROP_LOCATION: [MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, drop_location_received)],  
-            PASSENGERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, passengers_received)], 
             C_PHONE: [MessageHandler((filters.TEXT | filters.CONTACT) & ~filters.COMMAND, customer_phone_received)],
             CONFIRM_BOOKING: [ 
                 CallbackQueryHandler(booking_confirmed, pattern="^booking_confirm_"), 
