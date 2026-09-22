@@ -541,11 +541,8 @@ async def location_received(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return LOCATION  
 
         await update.message.reply_text( 
-            "📍 Please send your **Drop-off Pin**:\n\n"
-            "1. Click the 📎 (paperclip) icon.\n"
-            "2. Click the 📍 **Location** icon.\n"
-            "3. Choose your drop-off point on the map.\n"
-            "4. Send selected location.",
+            "📍 Please click the 📎 (paperclip) icon, choose **Location**, "
+            "select your **Drop-off point** on the map, and send it.",
             reply_markup=ReplyKeyboardRemove()
         ) 
         return DROP_LOCATION
