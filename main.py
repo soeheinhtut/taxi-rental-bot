@@ -762,12 +762,6 @@ async def booking_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )  # <== Update Phase1_18Sep26
         return ConversationHandler.END  # <== Update Phase1_18Sep26
 
-    # Persist the exact service window so future admin reports and database-level
-    # schedule queries do not need to reconstruct it from text fields.  # <== Update Phase1_18Sep26
-    schedule_start_dt, schedule_end_dt = get_booking_window(  # <== Update Phase1_18Sep26
-        data["date"], data["time"], vehicle, hours_db_value
-    )  # <== Update Phase1_18Sep26
-
     booking = Booking(
         id=booking_id,
         customer_id=query.from_user.id,
@@ -775,25 +769,13 @@ async def booking_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         date_str=data["date"],
         time_str=data["time"],
         hours=hours_db_value,
-        booking_mode=data.get("booking_mode", "SCHEDULED"),  # <== Update Phase1_18Sep26
-        start_at=schedule_start_dt,  # <== Update Phase1_18Sep26
-        end_at=schedule_end_dt,  # <== Update Phase1_18Sep26
         location=final_location,
         passengers=int(data["passengers"]),
         fare_mmk=fare_db_value,
         status="AVAILABLE",
         payment_method="DIRECT",
         payment_receipt_file_id=None,
-        driver_id=None,
-        driver_name=None,
-        customer_phone=phone,
-        pickup_lat=data.get("pickup_lat"),  # <== Update Phase1_18Sep26
-        pickup_lng=data.get("pickup_lng"),  # <== Update Phase1_18Sep26
-        drop_lat=data.get("drop_lat"),  # <== Update Phase1_18Sep26
-        drop_lng=data.get("drop_lng"),  # <== Update Phase1_18Sep26
-        route_distance_km=data.get("route_distance_km"),  # <== Update Phase1_18Sep26
-        route_duration_minutes=data.get("route_duration_minutes"),  # <== Update Phase1_18Sep26
-        distance_source=data.get("distance_source"),  # <== Update Phase1_18Sep26
+        customer_phone=phone
     )
 
     try:
