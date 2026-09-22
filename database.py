@@ -78,7 +78,7 @@ class Booking(Base):
     status: Mapped[str] = mapped_column(String(30), default="PENDING_PAYMENT", index=True)
     payment_method: Mapped[str] = mapped_column(String(50), nullable=True)
     payment_receipt_file_id: Mapped[str] = mapped_column(String(255), nullable=True)
-    driver_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("drivers.telegram_id"), nullable=True, index=True) # Added ForeignKey
+    driver_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("drivers.telegram_id"), nullable=True, index=True)
     driver_name: Mapped[str] = mapped_column(String(100), nullable=True)
     customer_phone: Mapped[str] = mapped_column(String(30), nullable=True)
 
@@ -94,21 +94,21 @@ class Booking(Base):
     route_duration_minutes: Mapped[float] = mapped_column(Float, nullable=True)
     distance_source: Mapped[str] = mapped_column(String(100), nullable=True)
 
-    # Replaced deprecated utcnow
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # FIXED: Added .replace(tzinfo=None) to match your existing database
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 class WalletTransaction(Base):
     __tablename__ = "wallet_transactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    driver_telegram_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("drivers.telegram_id"), index=True) # Added ForeignKey
+    driver_telegram_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("drivers.telegram_id"), index=True)
     amount: Mapped[float] = mapped_column(Float)
     type: Mapped[str] = mapped_column(String(50), index=True)
-    booking_id: Mapped[str] = mapped_column(String(30), ForeignKey("bookings.id"), nullable=True, index=True) # Added ForeignKey
+    booking_id: Mapped[str] = mapped_column(String(30), ForeignKey("bookings.id"), nullable=True, index=True)
     
-    # Replaced deprecated utcnow
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # FIXED: Added .replace(tzinfo=None) to match your existing database
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 async def init_db():
