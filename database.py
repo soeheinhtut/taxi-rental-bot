@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timezone
+import datetime
+from datetime import datetime, timezone, date
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -9,6 +10,7 @@ from sqlalchemy import (
     BigInteger,
     Float,
     DateTime,
+    Date,
     Text,
     ForeignKey,
     text,
@@ -28,7 +30,7 @@ elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL
         "postgresql://", "postgresql+asyncpg://", 1
     )
 
-# Added connection pooling limits to prevent Render DB crashes
+# Connection pooling settings optimized for deployment (e.g., Render DB)
 engine = create_async_engine(
     DATABASE_URL, 
     echo=False,
@@ -55,6 +57,10 @@ class Driver(Base):
     phone: Mapped[str] = mapped_column(String(30), nullable=True)
     car_model: Mapped[str] = mapped_column(String(100), nullable=True)
     license_plate: Mapped[str] = mapped_column(String(50), nullable=True)
+    
+    # NEW FIELDS FOR AUTOMATED CANCEL & PENALTY LOGIC
+    daily_cancels: Mapped[int] = mapped_column(Integer, default=0)
+    last_cancel_date: Mapped[date] = mapped_column(Date, nullable=True)
 
 
 class Booking(Base):
@@ -94,7 +100,6 @@ class Booking(Base):
     route_duration_minutes: Mapped[float] = mapped_column(Float, nullable=True)
     distance_source: Mapped[str] = mapped_column(String(100), nullable=True)
 
-    # FIXED: Added .replace(tzinfo=None) to match your existing database
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
@@ -107,7 +112,6 @@ class WalletTransaction(Base):
     type: Mapped[str] = mapped_column(String(50), index=True)
     booking_id: Mapped[str] = mapped_column(String(30), ForeignKey("bookings.id"), nullable=True, index=True)
     
-    # FIXED: Added .replace(tzinfo=None) to match your existing database
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
@@ -133,6 +137,10 @@ async def init_db():
         await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS route_distance_km FLOAT;"))
         await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS route_duration_minutes FLOAT;"))
         await conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS distance_source VARCHAR(100);"))
+
+        # MIGRATION STATEMENTS FOR AUTO-CANCEL TRACKING
+        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS daily_cancels INTEGER DEFAULT 0;"))
+        await conn.execute(text("ALTER TABLE drivers ADD COLUMN IF NOT EXISTS last_cancel_date DATE;"))
 
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bookings_driver_schedule ON bookings (driver_id, start_at, end_at);"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bookings_status_date ON bookings (status, date_str);"))
