@@ -21,6 +21,13 @@ from telegram.ext import (
 from sqlalchemy import select
 from database import AsyncSessionLocal, Booking, Driver, WalletTransaction, init_db
 
+from fastapi.responses import HTMLResponse
+
+@app.get("/webapp", response_class=HTMLResponse)
+async def serve_webapp():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
