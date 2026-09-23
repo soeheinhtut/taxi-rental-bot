@@ -10,7 +10,8 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Request
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, 
-    KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+    KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
+    WebAppInfo
 )
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
@@ -228,17 +229,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
         return ConversationHandler.END
     
-    keyboard = [
-        [InlineKeyboardButton("🚗 Book a Car", callback_data="start_booking")],
+    # 1. Provide the main keyboard with the Web App button
+    web_app = WebAppInfo(url="https://your-website.com")
+    reply_kb = ReplyKeyboardMarkup(
+        [[KeyboardButton("🚗 ကားငှားရန် (Book a Car App)", web_app=web_app)]],
+        resize_keyboard=True
+    )
+    
+    await update.message.reply_text(
+        "Welcome to MMDRIVE Car Rental Service!\n\nClick the button below to open our new interactive booking app, or use the menu for more options.",
+        reply_markup=reply_kb
+    )
+
+    # 2. Provide the fallback inline buttons for drivers and standard chat booking
+    inline_kb = [
+        [InlineKeyboardButton("🚗 Book via Chat", callback_data="start_booking")],
         [InlineKeyboardButton("👨‍✈️ Driver Register", callback_data="driver_register")],
         [InlineKeyboardButton("💳 Driver Top Up", callback_data="topup_start")],
         [InlineKeyboardButton("💰 Driver Profile & Check Balance", callback_data="driver_balance")]
     ]
     await update.message.reply_text(
-        "Welcome to MMDRIVE Car Rental Service! Please choose an option:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "Driver Options & Chat Booking:",
+        reply_markup=InlineKeyboardMarkup(inline_kb)
     )
     return ConversationHandler.END
+
+async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Retrieve the JSON payload submitted by the Web App
+    data_string = update.effective_message.web_app_data.data
+    data = json.loads(data_string)
+    
+    # This is a basic response. You can parse the data to create a Booking object here.
+    await update.message.reply_text(f"✅ Web App Booking Received:\n\nVehicle: {data.get('vehicle')}\nHours: {data.get('hours')}")
 
 async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -288,7 +310,7 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     keyboard = [
         [InlineKeyboardButton("🚕 Kilo Car (Min 5km 8,500 MMK)", callback_data="Kilo Car")], 
         [InlineKeyboardButton("Sedan", callback_data="Sedan")],                  
-        [InlineKeyboardButton("SUV", callback_data="SUV")],                      
+        [InlineKeyboardButton("SUV", callback_data="SUV")],                       
         [InlineKeyboardButton("Alphard / VIP", callback_data="Alphard / VIP")] 
     ]
     await query.edit_message_text(
@@ -309,7 +331,6 @@ async def vehicle_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="Markdown"
     )
     return BOOKING_MODE  
-
 
 async def booking_mode_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:  
     query = update.callback_query  
@@ -917,7 +938,7 @@ async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.message.from_user 
     plate_number = update.message.text 
     data = context.user_data 
-     
+      
     async with AsyncSessionLocal() as session: 
         res = await session.execute(select(Driver).where(Driver.telegram_id == user.id)) 
         driver = res.scalar_one_or_none() 
@@ -1461,6 +1482,7 @@ async def startup_event():
     telegram_app.add_handler(CallbackQueryHandler(driver_cancel_req, pattern="^dcancelreq_"))
     
     telegram_app.add_handler(MessageHandler(filters.LOCATION, driver_location_handler))
+    telegram_app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, receive_webapp_data))
  
     await telegram_app.initialize() 
     if RUN_MODE == "webhook": 
