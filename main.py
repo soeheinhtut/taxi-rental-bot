@@ -8,6 +8,7 @@ from urllib.request import Request as URLRequest, urlopen
 from datetime import datetime, timedelta  
 from zoneinfo import ZoneInfo  
 from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, 
     KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove,
@@ -20,13 +21,6 @@ from telegram.ext import (
 )
 from sqlalchemy import select
 from database import AsyncSessionLocal, Booking, Driver, WalletTransaction, init_db
-
-from fastapi.responses import HTMLResponse
-
-@app.get("/webapp", response_class=HTMLResponse)
-async def serve_webapp():
-    with open("index.html", "r", encoding="utf-8") as f:
-        return f.read()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,6 +65,7 @@ VEHICLE, BOOKING_MODE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, C_PHONE, CONF
 D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(9, 13)  
 TOPUP_PKG, TOPUP_RECEIPT = range(13, 15)  
 
+# app is defined here, so any @app routes must come AFTER this line
 app = FastAPI()
 telegram_app = None
 
@@ -236,8 +231,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
         return ConversationHandler.END
     
-    # 1. Provide the main keyboard with the Web App button
-    web_app = WebAppInfo(url="https://your-website.com")
+    # --- WEB APP LINK UPDATED HERE ---
+    web_app = WebAppInfo(url="https://my-taxi-bot-loc8.onrender.com/webapp")
     reply_kb = ReplyKeyboardMarkup(
         [[KeyboardButton("🚗 ကားငှားရန် (Book a Car App)", web_app=web_app)]],
         resize_keyboard=True
@@ -248,7 +243,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         reply_markup=reply_kb
     )
 
-    # 2. Provide the fallback inline buttons for drivers and standard chat booking
     inline_kb = [
         [InlineKeyboardButton("🚗 Book via Chat", callback_data="start_booking")],
         [InlineKeyboardButton("👨‍✈️ Driver Register", callback_data="driver_register")],
@@ -262,11 +256,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Retrieve the JSON payload submitted by the Web App
     data_string = update.effective_message.web_app_data.data
     data = json.loads(data_string)
     
-    # This is a basic response. You can parse the data to create a Booking object here.
     await update.message.reply_text(f"✅ Web App Booking Received:\n\nVehicle: {data.get('vehicle')}\nHours: {data.get('hours')}")
 
 async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1510,3 +1502,9 @@ async def webhook_endpoint(request: Request):
 @app.get("/") 
 def home(): 
     return {"status": "Bot is active!"}
+
+# --- WEB APP ROUTE FIXED HERE ---
+@app.get("/webapp", response_class=HTMLResponse)
+async def serve_webapp():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
