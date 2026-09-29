@@ -2,11 +2,11 @@ import os
 import logging
 import calendar
 import math
-import asyncio  
-import json  
-from urllib.request import Request as URLRequest, urlopen  
-from datetime import datetime, timedelta  
-from zoneinfo import ZoneInfo  
+import asyncio
+import json
+from urllib.request import Request as URLRequest, urlopen
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from telegram import (
@@ -25,8 +25,8 @@ from database import AsyncSessionLocal, Booking, Driver, WalletTransaction, init
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  
-ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))  
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "0"))
 DRIVER_GROUP_ID = int(os.getenv("DRIVER_GROUP_ID", "0"))
 RUN_MODE = os.getenv("RUN_MODE", "polling")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
@@ -40,18 +40,18 @@ PACKAGE_RATES = {
     "Alphard / VIP": {3: 105000, 5: 150000, 8: 240000} 
 } 
 
-YANGON_TZ = ZoneInfo("Asia/Yangon")  
-SERVICE_START_MINUTES = 5 * 60  
-SERVICE_END_MINUTES = 22 * 60  
-TIME_STEP_MINUTES = 15  
-INSTANT_DISPATCH_LEAD_MINUTES = 15  
-DRIVER_SCHEDULE_BUFFER_MINUTES = 30  
-KILO_DRIVER_BLOCK_MINUTES = 60  
-KILO_BASE_FARE = 8500.0  
-KILO_INCLUDED_KM = 5.0  
-KILO_EXTRA_KM_RATE = 1100.0  
-OSRM_BASE_URL = os.getenv("OSRM_BASE_URL", "https://router.project-osrm.org").rstrip("/")  
-OSRM_TIMEOUT_SECONDS = float(os.getenv("OSRM_TIMEOUT_SECONDS", "8"))  
+YANGON_TZ = ZoneInfo("Asia/Yangon")
+SERVICE_START_MINUTES = 5 * 60
+SERVICE_END_MINUTES = 22 * 60
+TIME_STEP_MINUTES = 15
+INSTANT_DISPATCH_LEAD_MINUTES = 15
+DRIVER_SCHEDULE_BUFFER_MINUTES = 30
+KILO_DRIVER_BLOCK_MINUTES = 60
+KILO_BASE_FARE = 8500.0
+KILO_INCLUDED_KM = 5.0
+KILO_EXTRA_KM_RATE = 1100.0
+OSRM_BASE_URL = os.getenv("OSRM_BASE_URL", "https://router.project-osrm.org").rstrip("/")
+OSRM_TIMEOUT_SECONDS = float(os.getenv("OSRM_TIMEOUT_SECONDS", "8"))
 
 TOPUP_PACKAGES = {
     "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},       
@@ -61,170 +61,170 @@ TOPUP_PACKAGES = {
     "pkg_1000": {"points": 1000, "price": 1000 * MMK_PER_POINT},
 }
 
-VEHICLE, BOOKING_MODE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, C_PHONE, CONFIRM_BOOKING = range(9)  
-D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(9, 13)  
-TOPUP_PKG, TOPUP_RECEIPT = range(13, 15)  
+VEHICLE, BOOKING_MODE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, C_PHONE, CONFIRM_BOOKING = range(9)
+D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(9, 13)
+TOPUP_PKG, TOPUP_RECEIPT = range(13, 15)
 
 # app is defined here, so any @app routes must come AFTER this line
 app = FastAPI()
 telegram_app = None
 
-def calculate_distance(lat1, lon1, lat2, lon2):  
-    R = 6371.0  
-    dlat = math.radians(lat2 - lat1)  
-    dlon = math.radians(lon2 - lon1)  
-    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2  
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))  
-    return R * c  
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
-def get_yangon_now():  
-    return datetime.now(YANGON_TZ)  
+def get_yangon_now():
+    return datetime.now(YANGON_TZ)
 
-def format_picker_time(hour24, minute):  
-    return datetime.strptime(f"{hour24:02d}:{minute:02d}", "%H:%M").strftime("%I:%M %p")  
+def format_picker_time(hour24, minute):
+    return datetime.strptime(f"{hour24:02d}:{minute:02d}", "%H:%M").strftime("%I:%M %p")
 
-def normalize_picker_time(hour24, minute, min_total=None):  
-    total_minutes = hour24 * 60 + minute  
-    min_allowed = SERVICE_START_MINUTES if min_total is None else max(SERVICE_START_MINUTES, int(min_total))  
-    min_allowed = ((min_allowed + TIME_STEP_MINUTES - 1) // TIME_STEP_MINUTES) * TIME_STEP_MINUTES  
-    total_minutes = max(min_allowed, min(SERVICE_END_MINUTES, total_minutes))  
-    total_minutes = (total_minutes // TIME_STEP_MINUTES) * TIME_STEP_MINUTES  
-    total_minutes = max(min_allowed, min(SERVICE_END_MINUTES, total_minutes))  
-    return total_minutes // 60, total_minutes % 60  
+def normalize_picker_time(hour24, minute, min_total=None):
+    total_minutes = hour24 * 60 + minute
+    min_allowed = SERVICE_START_MINUTES if min_total is None else max(SERVICE_START_MINUTES, int(min_total))
+    min_allowed = ((min_allowed + TIME_STEP_MINUTES - 1) // TIME_STEP_MINUTES) * TIME_STEP_MINUTES
+    total_minutes = max(min_allowed, min(SERVICE_END_MINUTES, total_minutes))
+    total_minutes = (total_minutes // TIME_STEP_MINUTES) * TIME_STEP_MINUTES
+    total_minutes = max(min_allowed, min(SERVICE_END_MINUTES, total_minutes))
+    return total_minutes // 60, total_minutes % 60
 
-def next_quarter_hour(dt_obj, lead_minutes=0):  
-    candidate = dt_obj + timedelta(minutes=lead_minutes)  
-    minute_floor = (candidate.minute // TIME_STEP_MINUTES) * TIME_STEP_MINUTES  
-    candidate = candidate.replace(minute=minute_floor, second=0, microsecond=0)  
-    if candidate.minute < dt_obj.minute or (candidate == dt_obj and lead_minutes > 0):  
-        candidate += timedelta(minutes=TIME_STEP_MINUTES)  
-    if lead_minutes > 0 and candidate < dt_obj + timedelta(minutes=lead_minutes):  
-        candidate += timedelta(minutes=TIME_STEP_MINUTES)  
-    return candidate  
+def next_quarter_hour(dt_obj, lead_minutes=0):
+    candidate = dt_obj + timedelta(minutes=lead_minutes)
+    minute_floor = (candidate.minute // TIME_STEP_MINUTES) * TIME_STEP_MINUTES
+    candidate = candidate.replace(minute=minute_floor, second=0, microsecond=0)
+    if candidate.minute < dt_obj.minute or (candidate == dt_obj and lead_minutes > 0):
+        candidate += timedelta(minutes=TIME_STEP_MINUTES)
+    if lead_minutes > 0 and candidate < dt_obj + timedelta(minutes=lead_minutes):
+        candidate += timedelta(minutes=TIME_STEP_MINUTES)
+    return candidate
 
-def get_default_time_for_date(selected_date):  
-    today = get_yangon_now().date()  
-    selected = datetime.strptime(selected_date, "%Y-%m-%d").date()  
-    if selected > today:  
-        return 5, 0, SERVICE_START_MINUTES  
-    now = get_yangon_now()  
-    minimum = next_quarter_hour(now, INSTANT_DISPATCH_LEAD_MINUTES)  
-    minimum_total = minimum.hour * 60 + minimum.minute  
-    minimum_total = max(SERVICE_START_MINUTES, min(SERVICE_END_MINUTES, minimum_total))  
-    return normalize_picker_time(minimum.hour, minimum.minute, minimum_total)[0], normalize_picker_time(minimum.hour, minimum.minute, minimum_total)[1], minimum_total  
+def get_default_time_for_date(selected_date):
+    today = get_yangon_now().date()
+    selected = datetime.strptime(selected_date, "%Y-%m-%d").date()
+    if selected > today:
+        return 5, 0, SERVICE_START_MINUTES
+    now = get_yangon_now()
+    minimum = next_quarter_hour(now, INSTANT_DISPATCH_LEAD_MINUTES)
+    minimum_total = minimum.hour * 60 + minimum.minute
+    minimum_total = max(SERVICE_START_MINUTES, min(SERVICE_END_MINUTES, minimum_total))
+    return normalize_picker_time(minimum.hour, minimum.minute, minimum_total)[0], normalize_picker_time(minimum.hour, minimum.minute, minimum_total)[1], minimum_total
 
-def get_time_picker_keyboard(hour24=5, minute=0, min_total=None):  
-    hour24, minute = normalize_picker_time(hour24, minute, min_total)  
-    current_time = format_picker_time(hour24, minute)  
-    min_allowed = SERVICE_START_MINUTES if min_total is None else max(SERVICE_START_MINUTES, int(min_total))  
+def get_time_picker_keyboard(hour24=5, minute=0, min_total=None):
+    hour24, minute = normalize_picker_time(hour24, minute, min_total)
+    current_time = format_picker_time(hour24, minute)
+    min_allowed = SERVICE_START_MINUTES if min_total is None else max(SERVICE_START_MINUTES, int(min_total))
 
-    current_total = hour24 * 60 + minute  
-    prev_total = max(min_allowed, current_total - TIME_STEP_MINUTES)  
-    next_total = min(SERVICE_END_MINUTES, current_total + TIME_STEP_MINUTES)  
+    current_total = hour24 * 60 + minute
+    prev_total = max(min_allowed, current_total - TIME_STEP_MINUTES)
+    next_total = min(SERVICE_END_MINUTES, current_total + TIME_STEP_MINUTES)
 
-    keyboard = [  
-        [  
-            InlineKeyboardButton("⬆️ +1 Hour", callback_data=f"time_hour_{min(SERVICE_END_MINUTES // 60, hour24 + 1)}"),  
-            InlineKeyboardButton("⬆️ +15 Min", callback_data=f"time_total_{next_total}")  
-        ],  
-        [  
-            InlineKeyboardButton(f"🕐 {current_time}", callback_data="time_noop"),  
-            InlineKeyboardButton("✅ Select", callback_data="time_confirm")  
-        ],  
-        [  
-            InlineKeyboardButton("⬇️ -1 Hour", callback_data=f"time_hour_{max(5, hour24 - 1)}"),  
-            InlineKeyboardButton("⬇️ -15 Min", callback_data=f"time_total_{prev_total}")  
-        ],  
-        [  
-            InlineKeyboardButton("ℹ️ 05:00 AM – 10:00 PM • 15-min steps", callback_data="time_noop")  
-        ]  
-    ]  
-    return InlineKeyboardMarkup(keyboard)  
+    keyboard = [
+        [
+            InlineKeyboardButton("⬆️ +1 Hour", callback_data=f"time_hour_{min(SERVICE_END_MINUTES // 60, hour24 + 1)}"),
+            InlineKeyboardButton("⬆️ +15 Min", callback_data=f"time_total_{next_total}")
+        ],
+        [
+            InlineKeyboardButton(f"🕐 {current_time}", callback_data="time_noop"),
+            InlineKeyboardButton("✅ Select", callback_data="time_confirm")
+        ],
+        [
+            InlineKeyboardButton("⬇️ -1 Hour", callback_data=f"time_hour_{max(5, hour24 - 1)}"),
+            InlineKeyboardButton("⬇️ -15 Min", callback_data=f"time_total_{prev_total}")
+        ],
+        [
+            InlineKeyboardButton("ℹ️ 05:00 AM – 10:00 PM • 15-min steps", callback_data="time_noop")
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-def get_calendar_keyboard(year, month):  
-    keyboard = []  
-    today = get_yangon_now().date()  
-    keyboard.append([InlineKeyboardButton(f"{calendar.month_name[month]} {year}", callback_data="ignore")])  
-    keyboard.append([InlineKeyboardButton(day, callback_data="ignore") for day in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]])  
+def get_calendar_keyboard(year, month):
+    keyboard = []
+    today = get_yangon_now().date()
+    keyboard.append([InlineKeyboardButton(f"{calendar.month_name[month]} {year}", callback_data="ignore")])
+    keyboard.append([InlineKeyboardButton(day, callback_data="ignore") for day in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]])
 
-    month_calendar = calendar.monthcalendar(year, month)  
-    for week in month_calendar:  
-        row = []  
-        for day in week:  
-            if day == 0:  
-                row.append(InlineKeyboardButton(" ", callback_data="ignore"))  
-            else:  
-                day_date = datetime(year, month, day).date()  
-                if day_date < today:  
-                    row.append(InlineKeyboardButton("·", callback_data="date_past"))  
-                else:  
-                    row.append(InlineKeyboardButton(str(day), callback_data=f"date_{year}_{month}_{day}"))  
-        keyboard.append(row)  
+    month_calendar = calendar.monthcalendar(year, month)
+    for week in month_calendar:
+        row = []
+        for day in week:
+            if day == 0:
+                row.append(InlineKeyboardButton(" ", callback_data="ignore"))
+            else:
+                day_date = datetime(year, month, day).date()
+                if day_date < today:
+                    row.append(InlineKeyboardButton("·", callback_data="date_past"))
+                else:
+                    row.append(InlineKeyboardButton(str(day), callback_data=f"date_{year}_{month}_{day}"))
+        keyboard.append(row)
 
-    current_month_start = datetime(today.year, today.month, 1).date()  
-    shown_month_start = datetime(year, month, 1).date()  
-    prev_month = month - 1 if month > 1 else 12  
-    prev_year = year if month > 1 else year - 1  
-    next_month = month + 1 if month < 12 else 1  
-    next_year = year if month < 12 else year + 1  
+    current_month_start = datetime(today.year, today.month, 1).date()
+    shown_month_start = datetime(year, month, 1).date()
+    prev_month = month - 1 if month > 1 else 12
+    prev_year = year if month > 1 else year - 1
+    next_month = month + 1 if month < 12 else 1
+    next_year = year if month < 12 else year + 1
 
-    prev_button = InlineKeyboardButton("⏪", callback_data=f"cal_{prev_year}_{prev_month}") if shown_month_start > current_month_start else InlineKeyboardButton("⏪", callback_data="ignore")  
+    prev_button = InlineKeyboardButton("⏪", callback_data=f"cal_{prev_year}_{prev_month}") if shown_month_start > current_month_start else InlineKeyboardButton("⏪", callback_data="ignore")
 
-    keyboard.append([  
-        prev_button,  
-        InlineKeyboardButton("📅 Today", callback_data=f"date_{today.year}_{today.month}_{today.day}"),  
-        InlineKeyboardButton("⏩", callback_data=f"cal_{next_year}_{next_month}")  
-    ])  
-    return InlineKeyboardMarkup(keyboard)  
+    keyboard.append([
+        prev_button,
+        InlineKeyboardButton("📅 Today", callback_data=f"date_{today.year}_{today.month}_{today.day}"),
+        InlineKeyboardButton("⏩", callback_data=f"cal_{next_year}_{next_month}")
+    ])
+    return InlineKeyboardMarkup(keyboard)
 
-def get_booking_mode_keyboard():  
-    return InlineKeyboardMarkup([  
-        [InlineKeyboardButton("⚡ Book Now (ASAP)", callback_data="mode_instant")],  
-        [InlineKeyboardButton("📅 Schedule for Later", callback_data="mode_scheduled")]  
-    ])  
+def get_booking_mode_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Book Now (ASAP)", callback_data="mode_instant")],
+        [InlineKeyboardButton("📅 Schedule for Later", callback_data="mode_scheduled")]
+    ])
 
-def parse_booking_start(date_str, time_str):  
-    return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M %p").replace(tzinfo=YANGON_TZ)  
+def parse_booking_start(date_str, time_str):
+    return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M %p").replace(tzinfo=YANGON_TZ)
 
-def format_end_time(start_dt, minutes):  
-    return (start_dt + timedelta(minutes=minutes)).strftime("%I:%M %p")  
+def format_end_time(start_dt, minutes):
+    return (start_dt + timedelta(minutes=minutes)).strftime("%I:%M %p")
 
-def get_booking_window(date_str, time_str, vehicle, hours):  
-    start_dt = parse_booking_start(date_str, time_str)  
-    if vehicle == "Kilo Car":  
-        stored_hours = max(1, int(hours or 0))  
-        duration_minutes = max(KILO_DRIVER_BLOCK_MINUTES, stored_hours * 60)  
-    else:  
-        duration_minutes = max(1, int(hours)) * 60  
-    return start_dt, start_dt + timedelta(minutes=duration_minutes)  
+def get_booking_window(date_str, time_str, vehicle, hours):
+    start_dt = parse_booking_start(date_str, time_str)
+    if vehicle == "Kilo Car":
+        stored_hours = max(1, int(hours or 0))
+        duration_minutes = max(KILO_DRIVER_BLOCK_MINUTES, stored_hours * 60)
+    else:
+        duration_minutes = max(1, int(hours)) * 60
+    return start_dt, start_dt + timedelta(minutes=duration_minutes)
 
-def calculate_kilo_fare(distance_km):  
-    if distance_km <= KILO_INCLUDED_KM:  
-        return KILO_BASE_FARE  
-    extra_km = math.ceil(distance_km - KILO_INCLUDED_KM)  
-    return KILO_BASE_FARE + (extra_km * KILO_EXTRA_KM_RATE)  
+def calculate_kilo_fare(distance_km):
+    if distance_km <= KILO_INCLUDED_KM:
+        return KILO_BASE_FARE
+    extra_km = math.ceil(distance_km - KILO_INCLUDED_KM)
+    return KILO_BASE_FARE + (extra_km * KILO_EXTRA_KM_RATE)
 
-async def get_road_route_km_duration(pickup_lat, pickup_lng, drop_lat, drop_lng):  
-    url = (  
-        f"{OSRM_BASE_URL}/route/v1/driving/"  
-        f"{pickup_lng},{pickup_lat};{drop_lng},{drop_lat}?overview=false"  
-    )  
+async def get_road_route_km_duration(pickup_lat, pickup_lng, drop_lat, drop_lng):
+    url = (
+        f"{OSRM_BASE_URL}/route/v1/driving/"
+        f"{pickup_lng},{pickup_lat};{drop_lng},{drop_lat}?overview=false"
+    )
 
-    def _request():  
-        req = URLRequest(url, headers={"User-Agent": "MMDRIVE-Car-Rental-Bot/1.0"})  
-        with urlopen(req, timeout=OSRM_TIMEOUT_SECONDS) as response:  
-            return json.loads(response.read().decode("utf-8"))  
+    def _request():
+        req = URLRequest(url, headers={"User-Agent": "MMDRIVE-Car-Rental-Bot/1.0"})
+        with urlopen(req, timeout=OSRM_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
 
-    try:  
-        data = await asyncio.to_thread(_request)  
-        if data.get("code") != "Ok" or not data.get("routes"):  
-            raise ValueError(data.get("message", "No route returned"))  
-        route = data["routes"][0]  
-        return float(route["distance"]) / 1000.0, float(route["duration"]) / 60.0, "Road distance (OSRM)"  
-    except Exception as e:  
-        straight_km = calculate_distance(pickup_lat, pickup_lng, drop_lat, drop_lng)  
-        logger.warning(f"OSRM route lookup failed, using Haversine fallback: {e}")  
-        return straight_km, None, "Estimated straight-line distance (routing unavailable)"  
+    try:
+        data = await asyncio.to_thread(_request)
+        if data.get("code") != "Ok" or not data.get("routes"):
+            raise ValueError(data.get("message", "No route returned"))
+        route = data["routes"][0]
+        return float(route["distance"]) / 1000.0, float(route["duration"]) / 60.0, "Road distance (OSRM)"
+    except Exception as e:
+        straight_km = calculate_distance(pickup_lat, pickup_lng, drop_lat, drop_lng)
+        logger.warning(f"OSRM route lookup failed, using Haversine fallback: {e}")
+        return straight_km, None, "Estimated straight-line distance (routing unavailable)"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -255,11 +255,113 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return ConversationHandler.END
 
-async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data_string = update.effective_message.web_app_data.data
     data = json.loads(data_string)
     
-    await update.message.reply_text(f"✅ Web App Booking Received:\n\nVehicle: {data.get('vehicle')}\nHours: {data.get('hours')}")
+    vehicle = data.get("vehicle", "Sedan")
+    mode = data.get("mode", "INSTANT")
+    hours = int(data.get("hours", 3))
+    phone = data.get("phone", "")
+    pickup = data.get("pickup", "")
+    dropoff = data.get("dropoff", "N/A")
+    
+    booking_id = f"RNT-{get_yangon_now().strftime('%Y%m%d')}-{int(get_yangon_now().timestamp()) % 10000}"
+    pax = 4 if vehicle == "Sedan" else (5 if vehicle == "SUV" else 8)
+    
+    context.user_data["vehicle"] = vehicle
+    context.user_data["booking_mode"] = mode
+    context.user_data["location"] = pickup
+    context.user_data["drop_location"] = dropoff if vehicle == "Kilo Car" else "N/A"
+    context.user_data["customer_phone"] = phone
+    context.user_data["passengers"] = pax
+    context.user_data["pickup_lat"] = None
+    context.user_data["pickup_lng"] = None
+    context.user_data["drop_lat"] = None
+    context.user_data["drop_lng"] = None
+    
+    # Calculate Date/Time
+    if mode == "INSTANT":
+        now = get_yangon_now()
+        pickup_dt = next_quarter_hour(now, INSTANT_DISPATCH_LEAD_MINUTES)
+        date_str = pickup_dt.strftime("%Y-%m-%d")
+        time_str = pickup_dt.strftime("%I:%M %p")
+    else:
+        date_str = data.get("date")
+        time_obj = datetime.strptime(data.get("time"), "%H:%M")
+        time_str = time_obj.strftime("%I:%M %p")
+        
+    context.user_data["date"] = date_str
+    context.user_data["time"] = time_str
+    
+    # Calculate Fare & Hours
+    if vehicle == "Kilo Car":
+        hours_label = "Point-to-Point (Kilo Car)"
+        fare_display = f"{KILO_BASE_FARE:,.0f} MMK (Base Fare - Meter Applies)"
+        fare_db_value = KILO_BASE_FARE
+        points_required = 1.0
+        hours_db_value = 1
+        end_label = "Arrival: **To be determined**"
+        context.user_data["route_distance_km"] = 0
+        context.user_data["distance_source"] = "Text Address (Actual meter applies)"
+        context.user_data["eta_time"] = None
+    else:
+        hours_label = f"{hours} Hours"
+        fare_db_value = float(PACKAGE_RATES[vehicle][hours])
+        fare_display = f"{fare_db_value:,.0f} MMK"
+        points_required = float(hours)
+        hours_db_value = hours
+        
+        start_dt = parse_booking_start(date_str, time_str)
+        end_dt = start_dt + timedelta(hours=hours)
+        end_label = f"Scheduled End: **{end_dt.strftime('%I:%M %p')}**"
+        context.user_data["end_time"] = end_dt.strftime("%I:%M %p")
+        
+    context.user_data["fare"] = fare_db_value
+    
+    # Generate Final Summary
+    booking_mode_label = "⚡ Book Now (ASAP)" if mode == "INSTANT" else "📅 Scheduled"
+    final_location = f"**Pickup:** {pickup}\n"
+    if vehicle == "Kilo Car":
+        final_location += f"**Drop-off:** {dropoff}\n"
+        
+    summary = (
+        f"🧾 **PLEASE CONFIRM YOUR BOOKING**\n\n"
+        f"🆔 Booking ID: `{booking_id}`\n"
+        f"🚙 Vehicle: {vehicle} (Max {pax} Pax)\n"
+        f"📌 Booking Type: **{booking_mode_label}**\n"
+        f"📅 Date: {date_str}\n"
+        f"🕐 Pickup: {time_str}\n"
+        f"{end_label}\n"
+        f"⏱ Package: {hours_label}\n"
+        f"📍 Location:\n{final_location}\n"
+        f"📞 Contact: `{phone}`\n\n"
+        f"💰 **Total Fare: {fare_display}**\n\n"
+    )
+    
+    if vehicle != "Kilo Car":
+        summary += "ℹ️ Please confirm that the pickup time, package, and scheduled end time are correct.\n\n"
+        
+    confirm_kb = [
+        [InlineKeyboardButton("✅ Confirm Booking", callback_data=f"booking_confirm_{booking_id}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="booking_cancel")],
+    ]
+    
+    # Save parameters for DB injection
+    context.user_data["pending_booking_id"] = booking_id
+    context.user_data["pending_final_location"] = final_location
+    context.user_data["pending_hours_label"] = hours_label
+    context.user_data["pending_points_required"] = points_required
+    context.user_data["pending_fare_display"] = fare_display
+    context.user_data["pending_fare_db_value"] = fare_db_value
+    context.user_data["pending_hours_db_value"] = hours_db_value
+    
+    await update.message.reply_text(
+        summary,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(confirm_kb)
+    )
+    return CONFIRM_BOOKING
 
 async def check_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -309,7 +411,7 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     keyboard = [
         [InlineKeyboardButton("🚕 Kilo Car (Min 5km 8,500 MMK)", callback_data="Kilo Car")], 
         [InlineKeyboardButton("Sedan", callback_data="Sedan")],                  
-        [InlineKeyboardButton("SUV", callback_data="SUV")],                       
+        [InlineKeyboardButton("SUV", callback_data="SUV")],                        
         [InlineKeyboardButton("Alphard / VIP", callback_data="Alphard / VIP")] 
     ]
     await query.edit_message_text(
@@ -1430,7 +1532,11 @@ async def startup_event():
     telegram_app = Application.builder().token(BOT_TOKEN).persistence(persistence=my_persistence).build() 
      
     conv_handler = ConversationHandler( 
-        entry_points=[CommandHandler("start", start), CallbackQueryHandler(start_booking_callback, pattern="^start_booking$")], 
+        entry_points=[
+            CommandHandler("start", start), 
+            CallbackQueryHandler(start_booking_callback, pattern="^start_booking$"),
+            MessageHandler(filters.StatusUpdate.WEB_APP_DATA, receive_webapp_data)
+        ], 
         states={ 
             VEHICLE: [CallbackQueryHandler(vehicle_chosen)], 
             BOOKING_MODE: [CallbackQueryHandler(booking_mode_chosen, pattern="^mode_(instant|scheduled)$")], 
@@ -1481,7 +1587,6 @@ async def startup_event():
     telegram_app.add_handler(CallbackQueryHandler(driver_cancel_req, pattern="^dcancelreq_"))
     
     telegram_app.add_handler(MessageHandler(filters.LOCATION, driver_location_handler))
-    telegram_app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, receive_webapp_data))
  
     await telegram_app.initialize() 
     if RUN_MODE == "webhook": 
@@ -1503,7 +1608,6 @@ async def webhook_endpoint(request: Request):
 def home(): 
     return {"status": "Bot is active!"}
 
-# --- WEB APP ROUTE FIXED HERE ---
 @app.get("/webapp", response_class=HTMLResponse)
 async def serve_webapp():
     with open("index.html", "r", encoding="utf-8") as f:
