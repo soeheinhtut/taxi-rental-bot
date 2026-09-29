@@ -11,21 +11,20 @@
             color: var(--tg-theme-text-color, #000000);
             font-family: Arial, sans-serif;
             padding: 20px;
-        }
-        h2 {
-            text-align: center;
+            margin: 0;
         }
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
         label {
             font-weight: bold;
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 5px;
         }
-        select {
+        select, input {
             width: 100%;
             padding: 12px;
+            box-sizing: border-box;
             border-radius: 8px;
             border: 1px solid #ccc;
             font-size: 16px;
@@ -43,15 +42,35 @@
             font-weight: bold;
             cursor: pointer;
             margin-top: 10px;
+            margin-bottom: 30px;
         }
     </style>
 </head>
 <body>
-    <h2>🚗 MMDRIVE Booking</h2>
+    <h3 style="text-align: center;">🚗 MMDRIVE Booking</h3>
+
+    <div class="form-group">
+        <label>Booking Mode:</label>
+        <select id="mode" onchange="toggleFields()">
+            <option value="INSTANT">⚡ Book Now (ASAP)</option>
+            <option value="SCHEDULED">📅 Schedule for Later</option>
+        </select>
+    </div>
+
+    <div id="datetime-group" style="display: none;">
+        <div class="form-group">
+            <label>Pickup Date:</label>
+            <input type="date" id="date">
+        </div>
+        <div class="form-group">
+            <label>Pickup Time:</label>
+            <input type="time" id="time">
+        </div>
+    </div>
 
     <div class="form-group">
         <label>Select Vehicle:</label>
-        <select id="vehicle" onchange="updatePackages()">
+        <select id="vehicle" onchange="toggleFields()">
             <option value="Kilo Car">🚕 Kilo Car</option>
             <option value="Sedan">Sedan</option>
             <option value="SUV">SUV</option>
@@ -61,22 +80,32 @@
 
     <div class="form-group">
         <label>Select Package:</label>
-        <select id="hours">
-            <!-- Options will be added by JavaScript -->
-        </select>
+        <select id="hours"></select>
     </div>
 
-    <button onclick="sendBooking()">Confirm & Send to Bot</button>
+    <div class="form-group">
+        <label>Pickup Address:</label>
+        <input type="text" id="pickup" placeholder="Enter your full address or landmarks">
+    </div>
+
+    <div class="form-group" id="dropoff-group">
+        <label>Drop-off Address:</label>
+        <input type="text" id="dropoff" placeholder="Enter drop-off destination">
+    </div>
+
+    <div class="form-group">
+        <label>Phone Number:</label>
+        <input type="tel" id="phone" placeholder="e.g. 09123456789">
+    </div>
+
+    <button onclick="sendBooking()">Preview & Confirm</button>
 
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
 
-        // Prices matching your main.py
         const packages = {
-            "Kilo Car": [
-                { value: "1", text: "Point-to-Point (Min 5km 8,500 MMK)" }
-            ],
+            "Kilo Car": [{ value: "1", text: "Point-to-Point (Min 5km 8,500 MMK)" }],
             "Sedan": [
                 { value: "3", text: "3 Hours (75,000 MMK)" },
                 { value: "5", text: "5 Hours (100,000 MMK)" },
@@ -94,14 +123,20 @@
             ]
         };
 
-        function updatePackages() {
+        function toggleFields() {
+            let mode = document.getElementById("mode").value;
             let vehicle = document.getElementById("vehicle").value;
+            
+            // Toggle Date/Time visibility
+            document.getElementById("datetime-group").style.display = (mode === "SCHEDULED") ? "block" : "none";
+            
+            // Toggle Drop-off visibility
+            document.getElementById("dropoff-group").style.display = (vehicle === "Kilo Car") ? "block" : "none";
+
+            // Update Hours Package Dropdown
             let hoursSelect = document.getElementById("hours");
-            
-            // Clear old options
+            let currentValue = hoursSelect.value;
             hoursSelect.innerHTML = "";
-            
-            // Add new options
             packages[vehicle].forEach(pkg => {
                 let option = document.createElement("option");
                 option.value = pkg.value;
@@ -111,19 +146,37 @@
         }
 
         function sendBooking() {
-            let vehicle = document.getElementById("vehicle").value;
-            let hours = document.getElementById("hours").value;
+            let mode = document.getElementById("mode").value;
+            let date = document.getElementById("date").value;
+            let time = document.getElementById("time").value;
+            let pickup = document.getElementById("pickup").value;
+            let phone = document.getElementById("phone").value;
+
+            // Simple validation
+            if (!pickup || !phone) {
+                tg.showAlert("Please fill in your Pickup Address and Phone Number.");
+                return;
+            }
+            if (mode === "SCHEDULED" && (!date || !time)) {
+                tg.showAlert("Please select a valid Date and Time.");
+                return;
+            }
 
             let data = {
-                vehicle: vehicle,
-                hours: hours
+                mode: mode,
+                date: date,
+                time: time,
+                vehicle: document.getElementById("vehicle").value,
+                hours: document.getElementById("hours").value,
+                pickup: pickup,
+                dropoff: document.getElementById("dropoff").value,
+                phone: phone
             };
 
             tg.sendData(JSON.stringify(data));
         }
 
-        // Run once to set initial values
-        updatePackages();
+        toggleFields(); // Run once on load
     </script>
 </body>
 </html>
