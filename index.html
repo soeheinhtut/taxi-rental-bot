@@ -1,24 +1,129 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Car Rental Booking</title>
-    <!-- Essential Telegram WebApp script -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MMDRIVE Booking</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            background-color: var(--tg-theme-bg-color, #f4f4f5);
+            color: var(--tg-theme-text-color, #000000);
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        h2 {
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 8px;
+        }
+        select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+            background-color: var(--tg-theme-secondary-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+        }
+        button {
+            background-color: var(--tg-theme-button-color, #2481cc);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            padding: 15px;
+            width: 100%;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Book a Car</h1>
-    <button id="submitBtn">Send Booking to Bot</button>
+    <h2>🚗 MMDRIVE Booking</h2>
+
+    <div class="form-group">
+        <label>Select Vehicle:</label>
+        <select id="vehicle" onchange="updatePackages()">
+            <option value="Kilo Car">🚕 Kilo Car</option>
+            <option value="Sedan">Sedan</option>
+            <option value="SUV">SUV</option>
+            <option value="Alphard / VIP">Alphard / VIP</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>Select Package:</label>
+        <select id="hours">
+            <!-- Options will be added by JavaScript -->
+        </select>
+    </div>
+
+    <button onclick="sendBooking()">Confirm & Send to Bot</button>
 
     <script>
-        // Initialize the Web App
-        const tg = window.Telegram.WebApp;
+        let tg = window.Telegram.WebApp;
         tg.expand();
 
-        document.getElementById("submitBtn").addEventListener("click", () => {
-            // Send data back to the Python bot
-            const data = JSON.stringify({ vehicle: "Sedan", hours: 5 });
-            tg.sendData(data); 
-        });
+        // Prices matching your main.py
+        const packages = {
+            "Kilo Car": [
+                { value: "1", text: "Point-to-Point (Min 5km 8,500 MMK)" }
+            ],
+            "Sedan": [
+                { value: "3", text: "3 Hours (75,000 MMK)" },
+                { value: "5", text: "5 Hours (100,000 MMK)" },
+                { value: "8", text: "8 Hours (160,000 MMK)" }
+            ],
+            "SUV": [
+                { value: "3", text: "3 Hours (90,000 MMK)" },
+                { value: "5", text: "5 Hours (125,000 MMK)" },
+                { value: "8", text: "8 Hours (200,000 MMK)" }
+            ],
+            "Alphard / VIP": [
+                { value: "3", text: "3 Hours (105,000 MMK)" },
+                { value: "5", text: "5 Hours (150,000 MMK)" },
+                { value: "8", text: "8 Hours (240,000 MMK)" }
+            ]
+        };
+
+        function updatePackages() {
+            let vehicle = document.getElementById("vehicle").value;
+            let hoursSelect = document.getElementById("hours");
+            
+            // Clear old options
+            hoursSelect.innerHTML = "";
+            
+            // Add new options
+            packages[vehicle].forEach(pkg => {
+                let option = document.createElement("option");
+                option.value = pkg.value;
+                option.text = pkg.text;
+                hoursSelect.appendChild(option);
+            });
+        }
+
+        function sendBooking() {
+            let vehicle = document.getElementById("vehicle").value;
+            let hours = document.getElementById("hours").value;
+
+            let data = {
+                vehicle: vehicle,
+                hours: hours
+            };
+
+            tg.sendData(JSON.stringify(data));
+        }
+
+        // Run once to set initial values
+        updatePackages();
     </script>
 </body>
 </html>
