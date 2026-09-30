@@ -190,12 +190,19 @@
         function initLeafletMap() {
             map = L.map('map').setView([defaultLat, defaultLng], 13);
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            // Fast CDN Tile Server (CartoDB Voyager)
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
-                attribution: '© OpenStreetMap'
+                subdomains: 'abcd',
+                attribution: '© OpenStreetMap & CartoDB'
             }).addTo(map);
 
-            // Pickup Marker (Green / Draggable)
+            // Fix the grey box glitch instantly
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 300);
+
+            // Pickup Marker (Draggable)
             pickupMarker = L.marker([defaultLat, defaultLng], { draggable: true }).addTo(map);
             pickupMarker.bindPopup("Pickup Location").openPopup();
 
