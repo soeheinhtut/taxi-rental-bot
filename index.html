@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MMDRIVE Booking</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- OpenStreetMap Leaflet Map CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <style>
         body {
             background-color: var(--tg-theme-bg-color, #f4f4f5);
@@ -32,31 +37,29 @@
             background-color: var(--tg-theme-secondary-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #000000);
         }
-        /* Autocomplete dropdown styling */
-        .suggestions-list {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: var(--tg-theme-secondary-bg-color, #ffffff);
+        /* Map container styling */
+        #map {
+            height: 220px;
+            width: 100%;
+            border-radius: 8px;
             border: 1px solid #ccc;
-            border-radius: 0 0 8px 8px;
-            max-height: 200px;
-            overflow-y: auto;
-            z-index: 1000;
-            box-shadow: 0px 4px 6px rgba(0,0,0,0.15);
+            margin-top: 8px;
+            margin-bottom: 10px;
+            z-index: 1;
         }
-        .suggestion-item {
-            padding: 10px 12px;
-            cursor: pointer;
-            border-bottom: 1px solid #eee;
+        .gps-btn {
+            background-color: #34c759;
+            color: #ffffff;
+            border: none;
+            padding: 10px;
+            width: 100%;
+            border-radius: 8px;
             font-size: 14px;
-            color: var(--tg-theme-text-color, #000000);
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 10px;
         }
-        .suggestion-item:hover {
-            background-color: var(--tg-theme-bg-color, #f4f4f5);
-        }
-        button {
+        button.submit-btn {
             background-color: var(--tg-theme-button-color, #2481cc);
             color: var(--tg-theme-button-text-color, #ffffff);
             border: none;
@@ -68,6 +71,25 @@
             cursor: pointer;
             margin-top: 10px;
             margin-bottom: 30px;
+        }
+        .suggestions-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--tg-theme-secondary-bg-color, #ffffff);
+            border: 1px solid #ccc;
+            border-radius: 0 0 8px 8px;
+            max-height: 180px;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.15);
+        }
+        .suggestion-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
         }
     </style>
 </head>
@@ -108,17 +130,22 @@
         <select id="hours"></select>
     </div>
 
+    <!-- Pickup Section with Map -->
     <div class="form-group">
-        <label>Pickup Address:</label>
-        <input type="text" id="pickup" placeholder="Type to search OpenStreetMap..." autocomplete="off" oninput="handleSearch('pickup', 'pickup-suggestions', 'pickup_lat', 'pickup_lng')">
+        <label>Pickup Location:</label>
+        <button type="button" class="gps-btn" onclick="getCurrentGPS('pickup')">📍 Use My Current Location (GPS)</button>
+        <input type="text" id="pickup" placeholder="Type location or tap pin on map..." autocomplete="off" oninput="handleSearch('pickup', 'pickup-suggestions')">
         <div id="pickup-suggestions" class="suggestions-list"></div>
+        <div id="map"></div>
         <input type="hidden" id="pickup_lat">
         <input type="hidden" id="pickup_lng">
     </div>
 
+    <!-- Dropoff Section -->
     <div class="form-group" id="dropoff-group">
         <label>Drop-off Address:</label>
-        <input type="text" id="dropoff" placeholder="Type to search destination..." autocomplete="off" oninput="handleSearch('dropoff', 'dropoff-suggestions', 'drop_lat', 'drop_lng')">
+        <button type="button" class="gps-btn" onclick="getCurrentGPS('dropoff')">📍 Set Drop-off to My GPS</button>
+        <input type="text" id="dropoff" placeholder="Type drop-off destination..." autocomplete="off" oninput="handleSearch('dropoff', 'dropoff-suggestions')">
         <div id="dropoff-suggestions" class="suggestions-list"></div>
         <input type="hidden" id="drop_lat">
         <input type="hidden" id="drop_lng">
@@ -129,11 +156,16 @@
         <input type="tel" id="phone" placeholder="e.g. 09123456789">
     </div>
 
-    <button onclick="sendBooking()">Preview & Confirm</button>
+    <button class="submit-btn" onclick="sendBooking()">Preview & Confirm</button>
 
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
+
+        // Default map center: Yangon, Myanmar
+        let defaultLat = 16.8661;
+        let defaultLng = 96.1951;
+        let map, pickupMarker, dropoffMarker;
 
         const packages = {
             "Kilo Car": [{ value: "1", text: "Point-to-Point (Min 5km 8,500 MMK)" }],
@@ -154,6 +186,78 @@
             ]
         };
 
+        // Initialize Map
+        function initLeafletMap() {
+            map = L.map('map').setView([defaultLat, defaultLng], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+
+            // Pickup Marker (Green / Draggable)
+            pickupMarker = L.marker([defaultLat, defaultLng], { draggable: true }).addTo(map);
+            pickupMarker.bindPopup("Pickup Location").openPopup();
+
+            pickupMarker.on('dragend', function (e) {
+                let position = pickupMarker.getLatLng();
+                updateCoordinates('pickup', position.lat, position.lng);
+                reverseGeocode(position.lat, position.lng, 'pickup');
+            });
+
+            // Map click updates pickup location
+            map.on('click', function(e) {
+                pickupMarker.setLatLng(e.latlng);
+                updateCoordinates('pickup', e.latlng.lat, e.latlng.lng);
+                reverseGeocode(e.latlng.lat, e.latlng.lng, 'pickup');
+            });
+        }
+
+        function updateCoordinates(type, lat, lng) {
+            if (type === 'pickup') {
+                document.getElementById('pickup_lat').value = lat;
+                document.getElementById('pickup_lng').value = lng;
+            } else {
+                document.getElementById('drop_lat').value = lat;
+                document.getElementById('drop_lng').value = lng;
+            }
+        }
+
+        // Reverse Geocode (Coordinates -> Address)
+        function reverseGeocode(lat, lng, inputId) {
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.display_name) {
+                        document.getElementById(inputId).value = data.display_name;
+                    }
+                })
+                .catch(err => console.error(err));
+        }
+
+        // GPS Location Fetching
+        function getCurrentGPS(type) {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    let lat = position.coords.latitude;
+                    let lng = position.coords.longitude;
+
+                    updateCoordinates(type, lat, lng);
+                    map.setView([lat, lng], 16);
+
+                    if (type === 'pickup') {
+                        pickupMarker.setLatLng([lat, lng]);
+                    }
+
+                    reverseGeocode(lat, lng, type);
+                }, () => {
+                    tg.showAlert("Location permission denied. Please select location manually on the map.");
+                });
+            } else {
+                tg.showAlert("GPS location is not supported by your browser.");
+            }
+        }
+
         function toggleFields() {
             let mode = document.getElementById("mode").value;
             let vehicle = document.getElementById("vehicle").value;
@@ -171,9 +275,9 @@
             });
         }
 
-        // OpenStreetMap Search Handler with Debounce
+        // OpenStreetMap Search Handler
         let searchTimer;
-        function handleSearch(inputId, listId, latId, lngId) {
+        function handleSearch(inputId, listId) {
             clearTimeout(searchTimer);
             const query = document.getElementById(inputId).value.trim();
             const suggestionsContainer = document.getElementById(listId);
@@ -188,40 +292,25 @@
                     .then(response => response.json())
                     .then(data => {
                         suggestionsContainer.innerHTML = '';
-                        if (data.length === 0) {
-                            const noResult = document.createElement('div');
-                            noResult.className = 'suggestion-item';
-                            noResult.innerText = 'No location found';
-                            suggestionsContainer.appendChild(noResult);
-                            return;
-                        }
-
                         data.forEach(item => {
                             const div = document.createElement('div');
                             div.className = 'suggestion-item';
                             div.innerText = item.display_name;
                             div.onclick = function() {
                                 document.getElementById(inputId).value = item.display_name;
-                                document.getElementById(latId).value = item.lat;
-                                document.getElementById(lngId).value = item.lon;
+                                updateCoordinates(inputId, item.lat, item.lon);
+                                
+                                if (inputId === 'pickup') {
+                                    map.setView([item.lat, item.lon], 15);
+                                    pickupMarker.setLatLng([item.lat, item.lon]);
+                                }
                                 suggestionsContainer.innerHTML = '';
                             };
                             suggestionsContainer.appendChild(div);
                         });
-                    })
-                    .catch(err => {
-                        console.error('OpenStreetMap Search error:', err);
                     });
             }, 400);
         }
-
-        // Close suggestions when tapping outside
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.form-group')) {
-                document.getElementById('pickup-suggestions').innerHTML = '';
-                document.getElementById('dropoff-suggestions').innerHTML = '';
-            }
-        });
 
         function sendBooking() {
             let mode = document.getElementById("mode").value;
@@ -262,7 +351,10 @@
             tg.sendData(JSON.stringify(data));
         }
 
-        toggleFields();
+        window.onload = function() {
+            toggleFields();
+            initLeafletMap();
+        };
     </script>
 </body>
 </html>
