@@ -65,7 +65,6 @@ VEHICLE, BOOKING_MODE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, C_PHONE, CONF
 D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(9, 13)
 TOPUP_PKG, TOPUP_RECEIPT = range(13, 15)
 
-# app is defined here, so any @app routes must come AFTER this line
 app = FastAPI()
 telegram_app = None
 
@@ -231,7 +230,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message.chat.type != "private":
         return ConversationHandler.END
     
-    # --- WEB APP LINK UPDATED HERE ---
     web_app = WebAppInfo(url="https://my-taxi-bot-loc8.onrender.com/webapp")
     reply_kb = ReplyKeyboardMarkup(
         [[KeyboardButton("🚗 ကားငှားရန် (Book a Car App)", web_app=web_app)]],
@@ -245,7 +243,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     inline_kb = [
         [InlineKeyboardButton("🚗 Book via Chat", callback_data="start_booking")],
-        [InlineKeyboardButton("👨‍✈️ Driver Register", callback_data="driver_register")],
+        [InlineKeyboardButton("👨‍‍✈️ Driver Register", callback_data="driver_register")],
         [InlineKeyboardButton("💳 Driver Top Up", callback_data="topup_start")],
         [InlineKeyboardButton("💰 Driver Profile & Check Balance", callback_data="driver_balance")]
     ]
@@ -280,7 +278,6 @@ async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["drop_lat"] = None
     context.user_data["drop_lng"] = None
     
-    # Calculate Date/Time
     if mode == "INSTANT":
         now = get_yangon_now()
         pickup_dt = next_quarter_hour(now, INSTANT_DISPATCH_LEAD_MINUTES)
@@ -294,7 +291,6 @@ async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["date"] = date_str
     context.user_data["time"] = time_str
     
-    # Calculate Fare & Hours
     if vehicle == "Kilo Car":
         hours_label = "Point-to-Point (Kilo Car)"
         fare_display = f"{KILO_BASE_FARE:,.0f} MMK (Base Fare - Meter Applies)"
@@ -319,7 +315,6 @@ async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         
     context.user_data["fare"] = fare_db_value
     
-    # Generate Final Summary
     booking_mode_label = "⚡ Book Now (ASAP)" if mode == "INSTANT" else "📅 Scheduled"
     final_location = f"**Pickup:** {pickup}\n"
     if vehicle == "Kilo Car":
@@ -347,7 +342,6 @@ async def receive_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("❌ Cancel", callback_data="booking_cancel")],
     ]
     
-    # Save parameters for DB injection
     context.user_data["pending_booking_id"] = booking_id
     context.user_data["pending_final_location"] = final_location
     context.user_data["pending_hours_label"] = hours_label
@@ -408,11 +402,12 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
+    # --- VEHICLE MENU TEXT UPDATED HERE ---
     keyboard = [
-        [InlineKeyboardButton("🚕 Kilo Car (Min 5km 8,500 MMK)", callback_data="Kilo Car")], 
-        [InlineKeyboardButton("Sedan", callback_data="Sedan")],                  
-        [InlineKeyboardButton("SUV", callback_data="SUV")],                        
-        [InlineKeyboardButton("Alphard / VIP", callback_data="Alphard / VIP")] 
+        [InlineKeyboardButton("🚕 Private Route (Point-to-Point)", callback_data="Kilo Car")], 
+        [InlineKeyboardButton("🚗 Private Ride(Sedan/HatchBack)", callback_data="Sedan")],                  
+        [InlineKeyboardButton("🚙 LUXPath(Premium SUV & Extra Comfort)", callback_data="SUV")],                        
+        [InlineKeyboardButton("🚐 GrandPath (Luxury MPV & First-Class)", callback_data="Alphard / VIP")] 
     ]
     await query.edit_message_text(
         "🚘 Select Vehicle Type:\n*(Note: Available Within Yangon City)*", 
@@ -899,7 +894,7 @@ async def booking_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if vehicle == "Kilo Car":
         route_line = (
             f"📏 Road Distance: **{data.get('route_distance_km', 0):.1f} km**\n"
-            f"🛣️ Distance Basis: {data.get('distance_source', 'N/A')}\n"
+            f"🛣️️ Distance Basis: {data.get('distance_source', 'N/A')}\n"
         ) if data.get("route_distance_km", 0) > 0 else "🛣️ Distance Basis: Text Address (Meter applies)\n"
         
         if data.get("route_duration_minutes") is not None:
