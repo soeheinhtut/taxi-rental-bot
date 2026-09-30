@@ -54,16 +54,49 @@ OSRM_BASE_URL = os.getenv("OSRM_BASE_URL", "https://router.project-osrm.org").rs
 OSRM_TIMEOUT_SECONDS = float(os.getenv("OSRM_TIMEOUT_SECONDS", "8"))
 
 TOPUP_PACKAGES = {
-    "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},       
+    "pkg_1": {"points": 1, "price": 1 * MMK_PER_POINT},        
     "pkg_10": {"points": 10, "price": 10 * MMK_PER_POINT},
     "pkg_50": {"points": 50, "price": 50 * MMK_PER_POINT},
     "pkg_100": {"points": 100, "price": 100 * MMK_PER_POINT},
     "pkg_1000": {"points": 1000, "price": 1000 * MMK_PER_POINT},
 }
 
+MYANMAR_CARS = {
+    "Sedan": {
+        "Toyota": ["Vios", "Belta", "Premio", "Mark II", "Mark X", "Camry", "Wish", "Vitz", "Probox"],
+        "Suzuki": ["Swift", "Ciaz", "Celerio", "Wagon R", "Alto", "Ertiga", "Carry", "Super Carry"],
+        "Honda": ["Fit (Jazz)", "City", "Civic", "Insight", "Shuttle"],
+        "Nissan": ["Sunny (Almera)", "Note", "Tiida", "Teana", "March", "AD Van"],
+        "Mitsubishi": ["Attrage", "Mirage", "Lancer"],
+        "Hyundai / Kia": ["i10", "Accent", "Elantra", "Sonata", "Morning (Picanto)", "Rio", "Cerato", "Optima"],
+        "Mazda": ["Demio (Mazda 2)", "Axela (Mazda 3)", "Atenza (Mazda 6)"],
+        "BYD / MG": ["BYD Dolphin", "BYD Seal", "BYD Qin Plus", "MG 4 EV", "MG 5"]
+    },
+    "SUV": {
+        "Toyota": ["Fortuner", "Harrier", "Kluger", "Corolla Cross", "Land Cruiser", "Hilux (Vigo/Revo)"],
+        "Suzuki": ["Jimny", "Vitara"],
+        "Honda": ["CR-V", "Vezel (HR-V)"],
+        "Nissan": ["X-Trail", "Juke", "Navara"],
+        "Mitsubishi": ["Pajero", "Outlander", "Xpander", "RVR / ASX", "Eclipse Cross", "Triton"],
+        "Hyundai / Kia": ["Tucson", "Santa Fe", "Creta", "Venue", "Sorento", "Sportage", "Sonet", "Seltos"],
+        "Mazda": ["CX-5", "CX-3", "CX-8"],
+        "BYD / MG": ["BYD Atto 3", "BYD Tang", "MG ZS", "MG HS", "MG RX5", "MG ZS EV", "MG Extender"]
+    },
+    "Alphard / VIP": {
+        "Toyota": ["Alphard", "Hiace"],
+        "Suzuki": ["Ertiga"],
+        "Honda": ["Stepwgn", "Odyssey"],
+        "Nissan": ["Elgrand", "Serena"],
+        "Mitsubishi": ["Delica", "Xpander"],
+        "Hyundai / Kia": ["Starex / Grand Starex", "Custin", "Carnival", "Carens"],
+        "Mazda": ["Biante", "Premacy"],
+        "BYD / MG": ["BYD e6"]
+    }
+}
+
 VEHICLE, BOOKING_MODE, DATE, TIME, HOURS, LOCATION, DROP_LOCATION, C_PHONE, CONFIRM_BOOKING = range(9)
-D_NAME, D_PHONE, D_VEHICLE, D_PLATE = range(9, 13)
-TOPUP_PKG, TOPUP_RECEIPT = range(13, 15)
+D_NAME, D_PHONE, D_CATEGORY, D_BRAND, D_MODEL, D_MODEL_MANUAL, D_PLATE = range(9, 16)
+TOPUP_PKG, TOPUP_RECEIPT = range(16, 18)
 
 app = FastAPI()
 telegram_app = None
@@ -182,6 +215,35 @@ def get_booking_mode_keyboard():
         [InlineKeyboardButton("📅 Schedule for Later", callback_data="mode_scheduled")]
     ])
 
+def get_category_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚗 Private Ride (Sedan/Hatchback)", callback_data="dcat_Sedan")],
+        [InlineKeyboardButton("🚙 LUXPath (Premium SUV)", callback_data="dcat_SUV")],
+        [InlineKeyboardButton("🚐 GrandPath (Luxury MPV / VIP)", callback_data="dcat_Alphard / VIP")]
+    ])
+
+def get_brand_keyboard(category):
+    brands = list(MYANMAR_CARS.get(category, {}).keys())
+    keyboard = []
+    for i in range(0, len(brands), 2):
+        row = [InlineKeyboardButton(brands[i], callback_data=f"dbrand_{brands[i]}")]
+        if i + 1 < len(brands):
+            row.append(InlineKeyboardButton(brands[i+1], callback_data=f"dbrand_{brands[i+1]}"))
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("✏️ Other (Type Manually)", callback_data="dbrand_other")])
+    return InlineKeyboardMarkup(keyboard)
+
+def get_model_keyboard(category, brand):
+    models = MYANMAR_CARS.get(category, {}).get(brand, [])
+    keyboard = []
+    for i in range(0, len(models), 2):
+        row = [InlineKeyboardButton(models[i], callback_data=f"dmodel_{models[i]}")]
+        if i + 1 < len(models):
+            row.append(InlineKeyboardButton(models[i+1], callback_data=f"dmodel_{models[i+1]}"))
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("✏️ Other Model", callback_data="dmodel_other")])
+    return InlineKeyboardMarkup(keyboard)
+
 def parse_booking_start(date_str, time_str):
     return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %I:%M %p").replace(tzinfo=YANGON_TZ)
 
@@ -243,7 +305,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     inline_kb = [
         [InlineKeyboardButton("🚗 Book via Chat", callback_data="start_booking")],
-        [InlineKeyboardButton("👨‍‍✈️ Driver Register", callback_data="driver_register")],
+        [InlineKeyboardButton("👨‍‍✈️️ Driver Register", callback_data="driver_register")],
         [InlineKeyboardButton("💳 Driver Top Up", callback_data="topup_start")],
         [InlineKeyboardButton("💰 Driver Profile & Check Balance", callback_data="driver_balance")]
     ]
@@ -402,7 +464,6 @@ async def start_booking_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
-    # --- VEHICLE MENU TEXT UPDATED HERE ---
     keyboard = [
         [InlineKeyboardButton("🚕 Private Route (Point-to-Point)", callback_data="Kilo Car")], 
         [InlineKeyboardButton("🚗 Private Ride(Sedan/HatchBack)", callback_data="Sedan")],                  
@@ -894,7 +955,7 @@ async def booking_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if vehicle == "Kilo Car":
         route_line = (
             f"📏 Road Distance: **{data.get('route_distance_km', 0):.1f} km**\n"
-            f"🛣️️ Distance Basis: {data.get('distance_source', 'N/A')}\n"
+            f"🛣 Distance Basis: {data.get('distance_source', 'N/A')}\n"
         ) if data.get("route_distance_km", 0) > 0 else "🛣️ Distance Basis: Text Address (Meter applies)\n"
         
         if data.get("route_duration_minutes") is not None:
@@ -1022,13 +1083,71 @@ async def driver_name_received(update: Update, context: ContextTypes.DEFAULT_TYP
 async def driver_phone_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     contact = update.message.contact 
     context.user_data['driver_phone'] = contact.phone_number if contact else update.message.text 
-    await update.message.reply_text("🚗 Please enter your **Vehicle Brand and Model**:", reply_markup=ReplyKeyboardRemove()) 
-    return D_VEHICLE 
+    await update.message.reply_text(
+        "🚗 **Select your Vehicle Category:**", 
+        reply_markup=get_category_keyboard(),
+        parse_mode="Markdown",
+        reply_markup_remove=True
+    ) 
+    return D_CATEGORY
 
-async def driver_vehicle_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
-    context.user_data['driver_vehicle'] = update.message.text 
-    await update.message.reply_text("🔢 Please enter your **Car Plate Number**:") 
-    return D_PLATE 
+async def driver_category_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    category = query.data.replace("dcat_", "")
+    context.user_data['driver_category'] = category
+
+    await query.edit_message_text(
+        f"🚘 Category: **{category}**\n\nSelect your Car Brand:",
+        reply_markup=get_brand_keyboard(category),
+        parse_mode="Markdown"
+    )
+    return D_BRAND
+
+async def driver_brand_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    brand = query.data.replace("dbrand_", "")
+    
+    if brand == "other":
+        await query.edit_message_text("✏️ Please type your **Car Brand and Model** (e.g., Toyota Vios):")
+        return D_MODEL_MANUAL
+
+    context.user_data['driver_brand'] = brand
+    category = context.user_data['driver_category']
+
+    await query.edit_message_text(
+        f"🚘 Brand: **{brand}**\n\nSelect your Model:",
+        reply_markup=get_model_keyboard(category, brand),
+        parse_mode="Markdown"
+    )
+    return D_MODEL
+
+async def driver_model_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    model = query.data.replace("dmodel_", "")
+
+    if model == "other":
+        await query.edit_message_text("✏️ Please type your specific **Car Model**:")
+        return D_MODEL_MANUAL
+
+    full_vehicle_name = f"{context.user_data['driver_brand']} {model}"
+    context.user_data['driver_vehicle'] = full_vehicle_name
+
+    await query.edit_message_text(
+        f"✅ Selected: **{full_vehicle_name}**\n\n🔢 Please enter your **Car Plate Number**:",
+        parse_mode="Markdown"
+    )
+    return D_PLATE
+
+async def driver_manual_model_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data['driver_vehicle'] = update.message.text
+    await update.message.reply_text(
+        f"✅ Registered: **{update.message.text}**\n\n🔢 Please enter your **Car Plate Number**:",
+        parse_mode="Markdown"
+    )
+    return D_PLATE
 
 async def driver_plate_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: 
     user = update.message.from_user 
@@ -1254,7 +1373,7 @@ async def driver_cancel_req(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(
             chat_id=booking.customer_id, 
             text=(
-                f"⚠️ **DRIVER CANCELLED**\n\n"
+                f"⚠️️ **DRIVER CANCELLED**\n\n"
                 f"Your assigned driver had an emergency and had to cancel. "
                 f"Don't worry, your job (#{b_id}) is active and we are finding a new driver for you right away!"
             ),
@@ -1554,7 +1673,10 @@ async def startup_event():
         states={ 
             D_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_name_received)], 
             D_PHONE: [MessageHandler((filters.TEXT | filters.CONTACT) & ~filters.COMMAND, driver_phone_received)], 
-            D_VEHICLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_vehicle_received)], 
+            D_CATEGORY: [CallbackQueryHandler(driver_category_chosen, pattern="^dcat_")],
+            D_BRAND: [CallbackQueryHandler(driver_brand_chosen, pattern="^dbrand_")],
+            D_MODEL: [CallbackQueryHandler(driver_model_chosen, pattern="^dmodel_")],
+            D_MODEL_MANUAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_manual_model_received)],
             D_PLATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, driver_plate_received)] 
         }, 
         fallbacks=[CommandHandler("start", start)] 
