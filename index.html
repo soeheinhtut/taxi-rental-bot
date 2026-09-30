@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MMDRIVE Booking</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- Add Google Maps API (Replace YOUR_GOOGLE_MAPS_API_KEY) -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&libraries=places"></script>
     <style>
         body {
             background-color: var(--tg-theme-bg-color, #f4f4f5);
@@ -17,6 +15,7 @@
         }
         .form-group {
             margin-bottom: 15px;
+            position: relative;
         }
         label {
             font-weight: bold;
@@ -32,6 +31,30 @@
             font-size: 16px;
             background-color: var(--tg-theme-secondary-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #000000);
+        }
+        /* Autocomplete dropdown styling */
+        .suggestions-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--tg-theme-secondary-bg-color, #ffffff);
+            border: 1px solid #ccc;
+            border-radius: 0 0 8px 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.15);
+        }
+        .suggestion-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+            color: var(--tg-theme-text-color, #000000);
+        }
+        .suggestion-item:hover {
+            background-color: var(--tg-theme-bg-color, #f4f4f5);
         }
         button {
             background-color: var(--tg-theme-button-color, #2481cc);
@@ -87,16 +110,16 @@
 
     <div class="form-group">
         <label>Pickup Address:</label>
-        <input type="text" id="pickup" placeholder="Search Google Maps location">
-        <!-- Hidden inputs for coordinates -->
+        <input type="text" id="pickup" placeholder="Type to search OpenStreetMap..." autocomplete="off" oninput="handleSearch('pickup', 'pickup-suggestions', 'pickup_lat', 'pickup_lng')">
+        <div id="pickup-suggestions" class="suggestions-list"></div>
         <input type="hidden" id="pickup_lat">
         <input type="hidden" id="pickup_lng">
     </div>
 
     <div class="form-group" id="dropoff-group">
         <label>Drop-off Address:</label>
-        <input type="text" id="dropoff" placeholder="Search Google Maps destination">
-        <!-- Hidden inputs for coordinates -->
+        <input type="text" id="dropoff" placeholder="Type to search destination..." autocomplete="off" oninput="handleSearch('dropoff', 'dropoff-suggestions', 'drop_lat', 'drop_lng')">
+        <div id="dropoff-suggestions" class="suggestions-list"></div>
         <input type="hidden" id="drop_lat">
         <input type="hidden" id="drop_lng">
     </div>
@@ -148,33 +171,57 @@
             });
         }
 
-        // Initialize Google Maps Autocomplete
-        function initMap() {
-            let pickupInput = document.getElementById('pickup');
-            let dropoffInput = document.getElementById('dropoff');
+        // OpenStreetMap Search Handler with Debounce
+        let searchTimer;
+        function handleSearch(inputId, listId, latId, lngId) {
+            clearTimeout(searchTimer);
+            const query = document.getElementById(inputId).value.trim();
+            const suggestionsContainer = document.getElementById(listId);
 
-            let pickupAutocomplete = new google.maps.places.Autocomplete(pickupInput);
-            let dropoffAutocomplete = new google.maps.places.Autocomplete(dropoffInput);
+            if (query.length < 3) {
+                suggestionsContainer.innerHTML = '';
+                return;
+            }
 
-            pickupAutocomplete.addListener('place_changed', function() {
-                let place = pickupAutocomplete.getPlace();
-                if(place.geometry) {
-                    document.getElementById('pickup_lat').value = place.geometry.location.lat();
-                    document.getElementById('pickup_lng').value = place.geometry.location.lng();
-                }
-            });
+            searchTimer = setTimeout(() => {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`)
+                    .then(response => response.json())
+                    .then(data => {
+                        suggestionsContainer.innerHTML = '';
+                        if (data.length === 0) {
+                            const noResult = document.createElement('div');
+                            noResult.className = 'suggestion-item';
+                            noResult.innerText = 'No location found';
+                            suggestionsContainer.appendChild(noResult);
+                            return;
+                        }
 
-            dropoffAutocomplete.addListener('place_changed', function() {
-                let place = dropoffAutocomplete.getPlace();
-                if(place.geometry) {
-                    document.getElementById('drop_lat').value = place.geometry.location.lat();
-                    document.getElementById('drop_lng').value = place.geometry.location.lng();
-                }
-            });
+                        data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.className = 'suggestion-item';
+                            div.innerText = item.display_name;
+                            div.onclick = function() {
+                                document.getElementById(inputId).value = item.display_name;
+                                document.getElementById(latId).value = item.lat;
+                                document.getElementById(lngId).value = item.lon;
+                                suggestionsContainer.innerHTML = '';
+                            };
+                            suggestionsContainer.appendChild(div);
+                        });
+                    })
+                    .catch(err => {
+                        console.error('OpenStreetMap Search error:', err);
+                    });
+            }, 400);
         }
 
-        // Run map setup after page loads
-        window.addEventListener('load', initMap);
+        // Close suggestions when tapping outside
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.form-group')) {
+                document.getElementById('pickup-suggestions').innerHTML = '';
+                document.getElementById('dropoff-suggestions').innerHTML = '';
+            }
+        });
 
         function sendBooking() {
             let mode = document.getElementById("mode").value;
