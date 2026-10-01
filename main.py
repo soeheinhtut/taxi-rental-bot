@@ -1087,7 +1087,7 @@ async def driver_phone_received(update: Update, context: ContextTypes.DEFAULT_TY
         "🚗 **Select your Vehicle Category:**", 
         reply_markup=get_category_keyboard(),
         parse_mode="Markdown",
-        reply_markup_remove=True
+        
     ) 
     return D_CATEGORY
 
